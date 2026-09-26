@@ -55,8 +55,9 @@ def verify(tag):
     if not re.search(r"^verdict:\s*pass\s*$", record, re.M):
         print("release: record has no 'verdict: pass'", file=sys.stderr)
         ok = False
-    if not re.search(r"^approved-by:\s*\S+", record, re.M):
-        print("release: record has no 'approved-by:' line", file=sys.stderr)
+    m = re.search(r"^approved-by:\s*(\S.*?)\s*$", record, re.M)
+    if not m or re.fullmatch(r"(?i)pending|tbd|todo|none|-|<.*>", m.group(1)):
+        print("release: record is not signed off ('approved-by:' missing or a placeholder)", file=sys.stderr)
         ok = False
     print(f"release: {tag} content-id {cid} ({n} files): {'OK' if ok else 'FAILED'}", file=sys.stderr)
     return 0 if ok else 1
