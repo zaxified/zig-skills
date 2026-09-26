@@ -56,6 +56,24 @@ def usable_lines(block):
 ONE_ARG_RW = re.compile(r"\b(?!response\b|resp\b|req\b|request\b)[\w\])]+(?:\(\))?\.(reader|writer)\(\s*&?\w+(?:\[[^\]]*\])?\s*\)")
 
 
+# std.Io.File and std.Io.Dir methods take the Io instance first in 0.16
+# (checked against lib/std/Io/File.zig and Io/Dir.zig; iterate/walk do not).
+# Receivers are recognised by name, so this sees fragments the compile check
+# cannot. File.read/write/writeAll/readToEndAlloc and friends no longer exist.
+_IO_METHODS = (
+    "access close createDir createDirPath createDirPathOpen createFile deleteDir deleteFile "
+    "deleteTree openDir openFile readFile readLink realPath realPathFile realPathFileAlloc "
+    "setOwner setPermissions stat statFile writeFile createMemoryMap isTty length lock "
+    "readPositional readPositionalAll readStreaming setLength setTimestamps sync tryLock "
+    "unlock writePositional writePositionalAll writeStreaming writeStreamingAll"
+).split()
+_GONE = "read write writeAll readAll readToEndAlloc readToEndAllocOptions pread pwrite getEndPos seekTo seekBy getPos".split()
+_RECV = (r"(?:\b(?:file|f|dir|d|fd|handle|tmp_dir|tmp\.dir|src|dst|in_file|out_file|\w+_file|\w+_dir)"
+         r"|cwd\(\)|stdout\(\)|stderr\(\)|stdin\(\))")
+IO_ARITY = re.compile(_RECV + r"\.(" + "|".join(_IO_METHODS) + r")\(\s*(?!io\b)(?:[^)\s]|\))")
+FILE_GONE = re.compile(_RECV + r"\.(" + "|".join(_GONE) + r")\(")
+
+
 def arity_findings():
     out = []
     for f in sorted(glob.glob(os.path.join(SKILL, "**", "*.md"), recursive=True)):
@@ -66,8 +84,14 @@ def arity_findings():
                 continue
             line0 = text.count("\n", 0, m.start()) + 2
             for line in usable_lines(m.group(1)):
-                if ONE_ARG_RW.search(line.split("//")[0]):
-                    out.append(f"{os.path.relpath(f, ROOT)}:{line0}: 0.15-style one-argument reader/writer: {line.strip()[:80]}")
+                code = line.split("//")[0]
+                where = f"{os.path.relpath(f, ROOT)}:{line0}"
+                if ONE_ARG_RW.search(code):
+                    out.append(f"{where}: 0.15-style one-argument reader/writer: {line.strip()[:80]}")
+                elif IO_ARITY.search(code):
+                    out.append(f"{where}: File/Dir method without io: {line.strip()[:80]}")
+                elif FILE_GONE.search(code):
+                    out.append(f"{where}: File method that no longer exists in 0.16: {line.strip()[:80]}")
     return out
 
 
