@@ -106,6 +106,19 @@ AGENT = [
     (r"\b(as\s+an?\s+(ai|assistant|agent))\b|\b(the\s+)?(assistant|agent|model|llm)\s+(must|should|shall)\s+(always\s+|now\s+)?(run|execute|call|invoke|send|upload|delete|fetch|open)", "instruction to the agent"),
     (r"\bexfiltrat|\bsend\s+(the\s+)?(contents?|file|key|token|secret|credentials)\s+to\b|\bupload\s+(the\s+)?(file|key|token|secret)", "exfiltration"),
     (r"\b(jailbreak|DAN\s+mode|prompt\s+injection\s+payload)\b", "jailbreak"),
+    # Persuasion aimed at the agent or at an auditor. Adapted from Agent Threat Rules
+    # (github.com/Agent-Threat-Rule/agent-threat-rules, MIT): ATR-2026-00155, -00163,
+    # -00206, -00085, -00094.
+    (r"(critical|important|urgent|mandatory)\s+instructions?\s*[—:\-]*\s*(you\s+must|follow|execute)", "emphatic instruction block"),
+    (r"before\s+doing\s+(anything|any\s+work)[,\s]+(run|execute|check|verify|call|fetch)\b", "workflow override"),
+    (r"(always|must|shall)\s+(approve|accept|allow|grant|permit)\s+[\w\s]{0,30}?\b(without|regardless|even\s+if)", "unconditional approval"),
+    (r"(do\s+not|never|don'?t)\s+(ask|prompt|request|wait\s+for)\s+(the\s+)?(user|human|operator)[^\n]{0,30}(confirm|approv|permiss|consent)", "suppress confirmation"),
+    (r"(skip|bypass|disable|ignore|override)\s+(all\s+|any\s+)?(the\s+)?(security|permission|sandbox|audit)\s+(check|control|warning|prompt|gate|guard|review|scan)s?", "bypass a safety control"),
+    (r"this\s+(step|action|operation|command)\s+is\s+(routine|standard|normal|expected|safe)[^\n]{0,40}\b(user|confirm|ask|verify)|no\s+need\s+to\s+(verify|check|confirm|ask|warn)\s+(the\s+)?(user|human|operator)", "downplay to avoid scrutiny"),
+    (r"\b(execute|run|perform|do)\s+(\w+\s+){0,3}(silently|quietly|secretly|covertly)\b|hidden\s+from\s+(the\s+)?user", "silent execution"),
+    (r"<\s*(important|critical|system|priority|instructions?|admin|override)\b[^>]*>", "priority/instruction tag"),
+    (r"\b(pass(ed)?|clear(ed)?|satisf(y|ied))\s+[^\n]{0,15}(all\s+)?(audit|security|safety)\s+(layer|level|stage|check|gate|review|audit|scan)s?\b|mark(ed)?\s+(this\s+)?(file\s+|skill\s+)?as\s+(trusted|safe|verified|audited)|\b(trust|safety)\s+score\s*[:=]", "claims to have passed review"),
+    (r"\b(note|message|instruction)s?\s+(to|for)\s+(the\s+)?(auditor|reviewer|scanner|ai|model|llm|agent|assistant)\b", "addresses the reviewer"),
     (r"\b(shellcode|keylogger|ransomware|backdoor|rootkit|privilege\s+escalation|credential\s+stuffing|reverse\s+shell)\b"
      r"|\bexploit\s+(code|chain|kit)\b|\b(write|craft|build)\s+an?\s+exploit\b|\bexploit(ing)?\s+(the|a|this)\s+(vulnerab|bug|overflow|cve)",
      "offensive-security content"),
