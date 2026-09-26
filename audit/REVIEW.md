@@ -53,6 +53,10 @@ gate (`scripts/audit.py`) has already passed; this review looks for what pattern
 1. Claims labelled 0.16.0 that are not in 0.16.0, or version labels that are wrong.
 2. Measurements quoted without the conditions that make them meaningful.
 3. Statements about third-party projects that read as endorsements or accusations.
+4. The SKILL.md frontmatter `description` is loaded into every session that has the skill,
+   even when the skill is never invoked. It must agree with the body: an outdated
+   recommendation there (v0.16.0-r1 still said "use pthreads") reaches more agents than
+   any reference file.
 
 ## E. Privacy
 
