@@ -30,7 +30,7 @@ def check(path, text):
         m = re.search(r"\buses:\s*([^\s#]+)", line)
         if m and not m.group(1).startswith("./") and not re.search(r"@[0-9a-f]{40}$", m.group(1)):
             out.append(f"{rel}:{n}: action not pinned to a commit SHA: {m.group(1)}")
-        if re.search(r"\$\{\{\s*github\.(event|head_ref)", line):
+        if re.search(r"\$\{\{\s*github\.(event\.|head_ref)", line):
             out.append(f"{rel}:{n}: untrusted github.event/head_ref expression")
     return out
 

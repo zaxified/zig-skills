@@ -23,7 +23,7 @@ checked against the released 0.16.0 standard library in CI.
 ## Why you can trust a release
 
 A skill is not documentation a person skims; it is instructions an agent carries out with
-your permissions. So a release has to clear four independent checks:
+your permissions. So a release has to clear five independent checks:
 
 1. **Safety gate** (`scripts/audit.py`, CI and pre-push). The published content must be
    plain Markdown with no executable parts and no manifest keys that grant execution
@@ -34,13 +34,21 @@ your permissions. So a release has to clear four independent checks:
    secrets, encoded blobs, and unsafe advice. A legitimate hit is accepted only by an entry
    in `audit/allow.txt` tied to the hash of that exact line, with a reason. Every rule is
    proven by a planted sample in `tests/`.
-2. **Correctness check** (`scripts/check-std-paths.py`, CI). Every `std.a.b.c` path in the
+2. **An independent scanner.** CI also runs NVIDIA's
+   [SkillSpector](https://github.com/NVIDIA/SkillSpector) (static analysis, no model calls,
+   no credentials in its environment), installed at a vetted commit with dependencies from
+   its lockfile. Every finding it reports is either fixed or listed in
+   `audit/skillspector-baseline.yaml` with the exact matched text and the reason it is
+   harmless; any other finding fails the build. Workflows are checked by
+   [zizmor](https://github.com/zizmorcore/zizmor) and
+   [actionlint](https://github.com/rhysd/actionlint), each pinned by digest or checksum.
+3. **Correctness check** (`scripts/check-std-paths.py`, CI). Every `std.a.b.c` path in the
    correct examples must exist in the Zig 0.16.0 standard library.
-3. **Review of the change.** A reviewer model with read-only tools goes through the diff
+4. **Review of the change.** A reviewer model with read-only tools goes through the diff
    since the last release against a fixed checklist (`audit/REVIEW.md`). Its report is
    advisory, because the content under review can try to influence it; the deterministic
    gate decides.
-4. **A person signs off.** `audits/<tag>.md` records the release's content id (sha256 over
+5. **A person signs off.** `audits/<tag>.md` records the release's content id (sha256 over
    every published file), the review, `verdict: pass` and `approved-by:`. CI refuses a tag
    whose record is missing or does not match the tagged content byte for byte.
 

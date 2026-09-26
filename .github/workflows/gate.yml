@@ -9,8 +9,13 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: gate-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   safety:
+    name: Safety gate
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -18,7 +23,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Workflow hygiene
+      - name: Workflow hygiene (own quick check)
         run: python3 scripts/check-workflows.py
       - name: Gate tests (every rule fires on a planted sample)
         run: python3 -W error::ResourceWarning -m unittest discover -s tests
@@ -44,7 +49,68 @@ jobs:
           sys.exit(1 if bad else 0)
           PY
 
+  skillspector:
+    name: NVIDIA SkillSpector (independent scanner)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      SKILLSPECTOR_TAG: v2.12.0
+      SKILLSPECTOR_COMMIT: c7958a3268d9498644b22edb75d0f051bbc8cbfc
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv (hash-pinned)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/uvenv"
+          echo "uv==0.12.19 --hash=sha256:a63d18a0aa38ee9f21a5406afbbaeb41303bcd954be9d6b7c1b95ac275e53958" > "$RUNNER_TEMP/uv.txt"
+          "$RUNNER_TEMP/uvenv/bin/pip" install --quiet --require-hashes -r "$RUNNER_TEMP/uv.txt"
+      - name: Install SkillSpector at the vetted commit, dependencies from its lockfile
+        run: |
+          git clone --quiet --depth 1 --branch "$SKILLSPECTOR_TAG" https://github.com/NVIDIA/SkillSpector "$RUNNER_TEMP/skillspector"
+          test "$(git -C "$RUNNER_TEMP/skillspector" rev-parse HEAD)" = "$SKILLSPECTOR_COMMIT"
+          cd "$RUNNER_TEMP/skillspector" && "$RUNNER_TEMP/uvenv/bin/uv" sync --locked --no-dev --quiet
+      - name: Scan skills/zig (static only, no credentials in the environment)
+        run: |
+          env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/home" \
+            "$RUNNER_TEMP/skillspector/.venv/bin/skillspector" scan skills/zig --no-llm \
+            --baseline audit/skillspector-baseline.yaml --format json --output "$RUNNER_TEMP/report.json" || true
+          # The exit code only reflects the DO_NOT_INSTALL verdict; judge the report itself.
+          python3 - "$RUNNER_TEMP/report.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          print("risk:", d["risk_assessment"], "suppressed:", d["suppressed_count"])
+          for i in d["issues"]:
+              loc = i["location"]
+              print(f'{i["severity"]} {i["id"]} {loc.get("file")}:{loc.get("start_line")} {i.get("pattern")} :: {i.get("finding")}')
+          ok = d.get("execution_successful") and not d["issues"]
+          sys.exit(0 if ok else 1)
+          PY
+
+  workflows:
+    name: Workflow security (zizmor, actionlint)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: zizmor (image pinned by digest through the action, offline)
+        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        with:
+          version: "1.30.1"
+          online-audits: "false"
+          advanced-security: "false"
+          annotations: "true"
+      - name: actionlint (release tarball, checksum-pinned)
+        run: |
+          curl -sSfL --proto '=https' -o "$RUNNER_TEMP/al.tgz" https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $RUNNER_TEMP/al.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/al.tgz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -shellcheck= -pyflakes=
+
   std-paths:
+    name: Zig 0.16.0 correctness
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
@@ -66,8 +132,9 @@ jobs:
         run: python3 scripts/check-examples.py
 
   release:
+    name: Release record
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [safety, std-paths]
+    needs: [safety, skillspector, workflows, std-paths]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

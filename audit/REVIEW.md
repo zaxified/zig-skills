@@ -59,6 +59,12 @@ gate (`scripts/audit.py`) has already passed; this review looks for what pattern
 1. Names, e-mail addresses, home paths, host names, IP addresses, internal project or
    customer names, tokens.
 
+## F. Independent scanner
+
+1. Every entry added to `audit/skillspector-baseline.yaml` since the last release: is the
+   matched text really harmless, and is the rule scoped to that file and that text?
+2. After a scanner upgrade, re-run the scan without the baseline and re-triage.
+
 ## Record
 
 The result goes to `audits/<tag>.md`:
