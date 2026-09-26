@@ -67,10 +67,12 @@ def check(dest):
     mpath = os.path.join(dest, MANIFEST)
     if not os.path.exists(mpath):
         return fail(f"{dest} has no {MANIFEST}; not an installed release")
-    with open(mpath, encoding="utf-8") as f:
-        m = json.load(f)
+    m = read_manifest(dest)
     bad = 0
-    listed = {e["path"]: e["sha256"] for e in m["files"]}
+    listed = {}
+    for e in m["files"]:
+        inside(dest, e.get("path") if isinstance(e, dict) else None)
+        listed[e["path"]] = e["sha256"]
     for rel in payload_files(dest):
         if rel not in listed:
             print(f"install: extra file not in the release: {rel}", file=sys.stderr)
@@ -86,21 +88,57 @@ def check(dest):
     return 1 if bad else 0
 
 
-def remove_previous(dest):
-    """Remove only what a previous install recorded, then the empty dirs."""
-    with open(os.path.join(dest, MANIFEST), encoding="utf-8") as f:
+def inside(dest, rel):
+    """Resolve a manifest path, refusing anything that could leave dest.
+
+    The manifest lives in the consumer's tree, where anyone who can change
+    that tree can edit it: a path like ../../.bashrc or /etc/x, or a
+    symlinked directory on the way, must never reach os.remove.
+    """
+    if not isinstance(rel, str) or not rel or os.path.isabs(rel) or "\\" in rel:
+        raise SystemExit(f"install: refusing manifest path {rel!r}")
+    parts = rel.split("/")
+    if any(p in ("", ".", "..") for p in parts):
+        raise SystemExit(f"install: refusing manifest path {rel!r}")
+    root = os.path.realpath(dest)
+    path = os.path.join(root, *parts)
+    parent = os.path.realpath(os.path.dirname(path))
+    if parent != root and not parent.startswith(root + os.sep):
+        raise SystemExit(f"install: manifest path {rel!r} resolves outside {dest}")
+    return path
+
+
+def read_manifest(dest):
+    mpath = os.path.join(dest, MANIFEST)
+    if os.path.islink(mpath):
+        raise SystemExit(f"install: {mpath} is a symlink; refusing")
+    with open(mpath, encoding="utf-8") as f:
         m = json.load(f)
-    for e in m["files"]:
-        p = os.path.join(dest, e["path"])
-        if os.path.isfile(p) and not os.path.islink(p):
-            os.remove(p)
+    if not isinstance(m, dict) or not isinstance(m.get("files"), list):
+        raise SystemExit(f"install: {mpath} is malformed")
+    return m
+
+
+def remove_previous(dest):
+    """Remove only what a previous install recorded, then the empty dirs.
+
+    Everything is checked before anything is removed: a path that would leave
+    dest, or a file the previous release did not install, stops the install
+    with the destination untouched.
+    """
+    m = read_manifest(dest)
+    targets = [inside(dest, e.get("path") if isinstance(e, dict) else None) for e in m["files"]]
+    listed = {os.path.relpath(t, os.path.realpath(dest)).replace(os.sep, "/") for t in targets}
+    foreign = [p for p in payload_files(dest) if p not in listed]
+    if foreign:
+        raise SystemExit(f"install: {dest} holds files the previous release did not install: {foreign[:5]}; move them away first")
+    for t in targets:
+        if os.path.isfile(t) and not os.path.islink(t):
+            os.remove(t)
     os.remove(os.path.join(dest, MANIFEST))
     for d, dirs, files in sorted(os.walk(dest, topdown=False), key=lambda t: -len(t[0])):
         if not os.listdir(d):
             os.rmdir(d)
-    if os.path.exists(dest):
-        left = payload_files(dest)
-        raise SystemExit(f"install: {dest} still holds files the previous release did not install: {left[:5]}; move them away first")
 
 
 def install(dest, allow_untagged):
