@@ -28,6 +28,7 @@ python3 scripts/check-workflows.py
 python3 -m unittest discover -s tests
 python3 scripts/audit.py
 python3 scripts/check-std-paths.py      # needs zig 0.16.0 on PATH
+python3 scripts/check-examples.py       # compiles standalone examples; same
 ```
 
 ## Releases

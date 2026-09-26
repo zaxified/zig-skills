@@ -62,6 +62,8 @@ jobs:
           echo "$PWD/zig-x86_64-linux-${ZIG_VERSION}" >> "$GITHUB_PATH"
       - name: Every std path in the examples exists in Zig 0.16.0
         run: python3 scripts/check-std-paths.py
+      - name: Every standalone example compiles on Zig 0.16.0
+        run: python3 scripts/check-examples.py
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
