@@ -2,6 +2,8 @@
 
 A binary heap-based priority queue. Efficiently retrieves elements by priority order.
 
+**0.16:** `PriorityQueue` is unmanaged — it stores no allocator. Start from `.empty` (or `.initContext(context)` when `Context != void`) and pass the allocator to every method that grows or frees the backing storage (`push`, `pushSlice`, `deinit`, `ensureTotalCapacity`, `ensureUnusedCapacity`, `shrinkAndFree`, `clearAndFree`). There is no `init(allocator, context)`. Elements are added with `push`/`pushSlice` (not `add`/`addSlice`) and removed with `pop` (not `remove`/`removeOrNull`); `pop` already returns `?T`.
+
 ## When to Use
 
 - Need to repeatedly extract min or max element
@@ -22,8 +24,8 @@ fn lessThan(context: void, a: u32, b: u32) std.math.Order {
 
 const PQ = std.PriorityQueue(u32, void, lessThan);
 
-var queue = PQ.init(allocator, {});
-defer queue.deinit();
+var queue: PQ = .empty;
+defer queue.deinit(allocator);
 ```
 
 ## Max-Heap
@@ -41,21 +43,20 @@ const MaxPQ = std.PriorityQueue(u32, void, greaterThan);
 
 ```zig
 // Add elements
-try queue.add(54);
-try queue.add(12);
-try queue.add(7);
+try queue.push(allocator, 54);
+try queue.push(allocator, 12);
+try queue.push(allocator, 7);
 
 // Add multiple
-try queue.addSlice(&[_]u32{ 1, 2, 3 });
+try queue.pushSlice(allocator, &[_]u32{ 1, 2, 3 });
 
 // Peek at highest priority (doesn't remove)
 if (queue.peek()) |top| {
     std.debug.print("top: {}\n", .{top});  // 7 for min-heap
 }
 
-// Remove highest priority
-const top = queue.remove();       // asserts non-empty
-const maybe = queue.removeOrNull(); // returns ?T
+// Remove highest priority (returns null if empty)
+const maybe = queue.pop();
 
 // Size
 const n = queue.count();
@@ -65,10 +66,10 @@ const cap = queue.capacity();
 ## From Existing Slice
 
 ```zig
-// Take ownership of slice, heapify in place
-var items = try allocator.dupe(u32, &[_]u32{ 5, 3, 8, 1, 2 });
-var queue = PQ.fromOwnedSlice(allocator, items, {});
-defer queue.deinit();
+// Take ownership of an already-allocated slice, heapify in place (no allocator needed)
+const items = try allocator.dupe(u32, &[_]u32{ 5, 3, 8, 1, 2 });
+var queue = PQ.fromOwnedSlice(items, {});
+defer queue.deinit(allocator);
 // Now queue is a valid heap
 ```
 
@@ -77,14 +78,14 @@ defer queue.deinit();
 ```zig
 // Change priority of existing element
 try queue.update(old_value, new_value);
-// Error if old_value not found
+// Returns error.ElementNotFound if old_value not found
 ```
 
 ## Remove by Index
 
 ```zig
 // Remove element at specific position (not priority order)
-const removed = queue.removeIndex(index);
+const removed = queue.popIndex(index);
 ```
 
 ## Iteration (Non-Priority Order)
@@ -94,6 +95,7 @@ const removed = queue.removeIndex(index);
 var it = queue.iterator();
 while (it.next()) |elem| {
     // process elem
+    _ = elem;
 }
 it.reset();  // restart iteration
 ```
@@ -101,11 +103,11 @@ it.reset();  // restart iteration
 ## Capacity Management
 
 ```zig
-try queue.ensureTotalCapacity(100);
-try queue.ensureUnusedCapacity(10);
-queue.shrinkAndFree(new_capacity);
+try queue.ensureTotalCapacity(allocator, 100);
+try queue.ensureUnusedCapacity(allocator, 10);
+queue.shrinkAndFree(allocator, new_capacity);
 queue.clearRetainingCapacity();
-queue.clearAndFree();
+queue.clearAndFree(allocator);
 ```
 
 ## Context-Based Comparator
@@ -120,16 +122,16 @@ fn compareByScore(scores: []const u32, a: usize, b: usize) std.math.Order {
 const IndexPQ = std.PriorityQueue(usize, []const u32, compareByScore);
 
 const scores = [_]u32{ 50, 30, 80, 20 };
-var queue = IndexPQ.init(allocator, &scores);
-defer queue.deinit();
+var queue = IndexPQ.initContext(&scores);
+defer queue.deinit(allocator);
 
-try queue.add(0);  // score 50
-try queue.add(1);  // score 30
-try queue.add(2);  // score 80
-try queue.add(3);  // score 20
+try queue.push(allocator, 0);  // score 50
+try queue.push(allocator, 1);  // score 30
+try queue.push(allocator, 2);  // score 80
+try queue.push(allocator, 3);  // score 20
 
 // Removes index 3 (score 20 is smallest)
-const best = queue.remove();  // 3
+const best = queue.pop();  // 3
 ```
 
 ## Complete Example: Task Scheduler
@@ -151,15 +153,16 @@ const TaskQueue = std.PriorityQueue(Task, void, taskCompare);
 pub fn main() !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
-    var tasks = TaskQueue.init(gpa.allocator(), {});
-    defer tasks.deinit();
+    var tasks: TaskQueue = .empty;
+    defer tasks.deinit(allocator);
 
-    try tasks.add(.{ .name = "low priority", .priority = 100 });
-    try tasks.add(.{ .name = "urgent", .priority = 1 });
-    try tasks.add(.{ .name = "medium", .priority = 50 });
+    try tasks.push(allocator, .{ .name = "low priority", .priority = 100 });
+    try tasks.push(allocator, .{ .name = "urgent", .priority = 1 });
+    try tasks.push(allocator, .{ .name = "medium", .priority = 50 });
 
-    while (tasks.removeOrNull()) |task| {
+    while (tasks.pop()) |task| {
         std.debug.print("Processing: {s}\n", .{task.name});
     }
     // Output:
@@ -172,6 +175,6 @@ pub fn main() !void {
 ## Notes
 
 - Heap property: parent has higher priority than children
-- `remove()` is O(log n), `peek()` is O(1)
+- `pop()` is O(log n), `peek()` is O(1)
 - Iterator order is NOT priority order (it's heap array order)
-- Use `removeOrNull()` for safe extraction from potentially empty queue
+- `pop()` returns `null` for safe extraction from a potentially empty queue

@@ -233,6 +233,11 @@ pub fn main(init: std.process.Init) void {
     const hours = time.getHoursIntoDay();      // u5 (0-23)
     const minutes = time.getMinutesIntoHour(); // u6 (0-59)
     const seconds = time.getSecondsIntoMinute(); // u6 (0-59)
+
+    std.debug.print("{d}-{d}-{d} {d}:{d}:{d}\n", .{
+        year_day.year, @intFromEnum(month_day.month), month_day.day_index + 1,
+        hours, minutes, seconds,
+    });
 }
 ```
 

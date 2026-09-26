@@ -16,7 +16,9 @@ Parse IANA Time Zone Database files (TZif format, RFC 8536). Used to look up UTC
 ```zig
 const std = @import("std");
 
-pub fn main(io: std.Io) !void {
+pub fn main(process_init: std.process.Init) !void {
+    const io = process_init.io;
+
     var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
@@ -40,6 +42,7 @@ pub fn main(io: std.Io) !void {
 ## Parsing from Embedded Data
 
 ```zig
+// not standalone: @embedFile needs a real tz/asia_tokyo.tzif in the reader's project
 const std = @import("std");
 
 // Embed TZif file at compile time

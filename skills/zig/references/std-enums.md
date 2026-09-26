@@ -265,7 +265,7 @@ pub fn main() void {
 const std = @import("std");
 
 const State = enum { idle, running, paused, stopped };
-const Event = enum { start, pause, resume, stop };
+const Event = enum { start, pause, @"resume", stop };
 
 const TransitionMap = std.enums.EnumMap(Event, State);
 const StateTransitions = std.enums.EnumArray(State, TransitionMap);
@@ -273,7 +273,7 @@ const StateTransitions = std.enums.EnumArray(State, TransitionMap);
 const transitions = StateTransitions.init(.{
     .idle = TransitionMap.init(.{ .start = .running, .stop = .stopped }),
     .running = TransitionMap.init(.{ .pause = .paused, .stop = .stopped }),
-    .paused = TransitionMap.init(.{ .resume = .running, .stop = .stopped }),
+    .paused = TransitionMap.init(.{ .@"resume" = .running, .stop = .stopped }),
     .stopped = TransitionMap{},  // no transitions from stopped
 });
 
@@ -285,7 +285,7 @@ pub fn main() void {
     var state = State.idle;
     state = nextState(state, .start) orelse state;  // -> running
     state = nextState(state, .pause) orelse state;  // -> paused
-    state = nextState(state, .resume) orelse state; // -> running
+    state = nextState(state, .@"resume") orelse state; // -> running
     std.debug.print("Final state: {}\n", .{state});
 }
 ```

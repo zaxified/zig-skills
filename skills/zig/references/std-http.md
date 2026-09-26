@@ -21,7 +21,11 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var client: std.http.Client = .{ .allocator = allocator };
+    var threaded: std.Io.Threaded = .init(allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    var client: std.http.Client = .{ .allocator = allocator, .io = io };
     defer client.deinit();
 
     // Simple GET - response body discarded
@@ -35,7 +39,7 @@ pub fn main() !void {
 ### Fetch with Response Body
 
 ```zig
-var client: std.http.Client = .{ .allocator = allocator };
+var client: std.http.Client = .{ .allocator = allocator, .io = io };
 defer client.deinit();
 
 // Create writer to capture response
@@ -70,7 +74,7 @@ const result = try client.fetch(.{
 For more control over the request lifecycle:
 
 ```zig
-var client: std.http.Client = .{ .allocator = allocator };
+var client: std.http.Client = .{ .allocator = allocator, .io = io };
 defer client.deinit();
 
 const uri = try std.Uri.parse("https://api.example.com/resource");
@@ -198,7 +202,7 @@ std.debug.print("Final URL: {s}\n", .{req.uri.path.raw});
 Connections are automatically pooled and reused:
 
 ```zig
-var client: std.http.Client = .{ .allocator = allocator };
+var client: std.http.Client = .{ .allocator = allocator, .io = io };
 defer client.deinit();
 
 // Configure pool size (default 32)
@@ -221,7 +225,7 @@ for (0..10) |_| {
 **0.16:** `std.http.Proxy` is `std.http.Client.Proxy` (nested under `Client`, not a top-level `std.http` member); its `host` field is a `std.Io.net.HostName` (`.{ .bytes = "..." }`), not a raw string. `initDefaultProxies` also now takes an explicit `*const std.process.Environ.Map` (built from a `std.process.Environ` via `.createMap(gpa)`) instead of reading the environment itself:
 
 ```zig
-var client: std.http.Client = .{ .allocator = allocator };
+var client: std.http.Client = .{ .allocator = allocator, .io = io };
 defer client.deinit();
 
 // Load from environment (HTTP_PROXY, HTTPS_PROXY, etc.) — `environ_map` here is a
@@ -245,7 +249,7 @@ client.http_proxy = &proxy;
 ### TLS Configuration
 
 ```zig
-var client: std.http.Client = .{ .allocator = allocator };
+var client: std.http.Client = .{ .allocator = allocator, .io = io };
 defer client.deinit();
 
 // TLS is enabled by default for https://
@@ -268,23 +272,28 @@ const net = std.Io.net;  // 0.16: std.net is gone, use std.Io.net (see std-net.m
 const http = std.http;
 
 pub fn main() !void {
-    const address = net.Address.initIp4(.{ 127, 0, 0, 1 }, 8080);
-    var tcp_server = try address.listen(.{});
-    defer tcp_server.deinit();
+    var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    const address: net.IpAddress = .{ .ip4 = .loopback(8080) };
+    var tcp_server = try address.listen(io, .{});
+    defer tcp_server.deinit(io);
 
     while (true) {
-        const conn = try tcp_server.accept();
-        defer conn.stream.close();
+        // accept() returns a Stream directly, no `.stream` wrapper (0.16)
+        const stream = try tcp_server.accept(io);
+        defer stream.close(io);
 
         var read_buf: [8192]u8 = undefined;
         var write_buf: [4096]u8 = undefined;
 
-        var reader = conn.stream.reader(io, &read_buf);
-        var writer = conn.stream.writer(io, &write_buf);
+        var reader = stream.reader(io, &read_buf);
+        var writer = stream.writer(io, &write_buf);
 
-        var server = http.Server.init(reader.interface(), &writer.interface);
+        var server = http.Server.init(&reader.interface, &writer.interface);
 
-        const request = server.receiveHead() catch |err| {
+        var request = server.receiveHead() catch |err| {
             std.debug.print("Failed to receive: {}\n", .{err});
             continue;
         };
@@ -559,8 +568,8 @@ const Header = struct {
 ### JSON API Client
 
 ```zig
-fn fetchJson(comptime T: type, allocator: Allocator, url: []const u8) !T {
-    var client: std.http.Client = .{ .allocator = allocator };
+fn fetchJson(comptime T: type, allocator: Allocator, io: std.Io, url: []const u8) !T {
+    var client: std.http.Client = .{ .allocator = allocator, .io = io };
     defer client.deinit();
 
     var body_buf: [65536]u8 = undefined;
@@ -584,11 +593,11 @@ fn fetchJson(comptime T: type, allocator: Allocator, url: []const u8) !T {
 ### POST JSON Data
 
 ```zig
-fn postJson(allocator: Allocator, url: []const u8, data: anytype) !void {
+fn postJson(allocator: Allocator, io: std.Io, url: []const u8, data: anytype) !void {
     const json = try std.json.Stringify.valueAlloc(allocator, data, .{});
     defer allocator.free(json);
 
-    var client: std.http.Client = .{ .allocator = allocator };
+    var client: std.http.Client = .{ .allocator = allocator, .io = io };
     defer client.deinit();
 
     const result = try client.fetch(.{
@@ -607,8 +616,8 @@ fn postJson(allocator: Allocator, url: []const u8, data: anytype) !void {
 ### Download File
 
 ```zig
-fn downloadFile(allocator: Allocator, url: []const u8, path: []const u8) !void {
-    var client: std.http.Client = .{ .allocator = allocator };
+fn downloadFile(allocator: Allocator, io: std.Io, url: []const u8, path: []const u8) !void {
+    var client: std.http.Client = .{ .allocator = allocator, .io = io };
     defer client.deinit();
 
     const uri = try std.Uri.parse(url);
@@ -622,8 +631,8 @@ fn downloadFile(allocator: Allocator, url: []const u8, path: []const u8) !void {
 
     if (response.head.status != .ok) return error.HttpError;
 
-    const file = try std.Io.Dir.cwd().createFile(path, .{});
-    defer file.close();
+    const file = try std.Io.Dir.cwd().createFile(io, path, .{});
+    defer file.close(io);
 
     var file_buf: [4096]u8 = undefined;
     var file_writer = file.writer(io, &file_buf);

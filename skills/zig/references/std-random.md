@@ -53,6 +53,8 @@ pub fn main() void {
     const dice = random.intRangeLessThan(u8, 1, 7);  // 1-6
     const coin = random.boolean();
     const prob = random.float(f32);      // [0, 1)
+
+    std.debug.print("n={} dice={} coin={} prob={d}\n", .{ n, dice, coin, prob });
 }
 ```
 

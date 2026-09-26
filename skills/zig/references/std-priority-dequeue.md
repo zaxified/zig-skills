@@ -2,6 +2,8 @@
 
 A min-max heap that efficiently supports both min and max extraction. Unlike `PriorityQueue`, you can pop from either end.
 
+**0.16:** `PriorityDequeue` is unmanaged — it stores no allocator. Start from `.empty` (or `.initContext(context)` when `Context != void`) and pass the allocator to every method that grows the backing storage (`push`, `pushSlice`, `deinit`, `ensureTotalCapacity`, `ensureUnusedCapacity`, `shrinkAndFree`). There is no `init(allocator, context)`. Elements are added with `push`/`pushSlice` (not `add`/`addSlice`) and removed with `popMin`/`popMax` (not `removeMin`/`removeMax`); both already return `?T`, so there is no separate `*OrNull` variant.
+
 ## When to Use
 
 - Need both min and max extraction
@@ -21,20 +23,20 @@ fn compare(context: void, a: u32, b: u32) std.math.Order {
 
 const PDQ = std.PriorityDequeue(u32, void, compare);
 
-var dequeue = PDQ.init(allocator, {});
-defer dequeue.deinit();
+var dequeue: PDQ = .empty;
+defer dequeue.deinit(allocator);
 ```
 
 ## Basic Operations
 
 ```zig
 // Add elements
-try dequeue.add(54);
-try dequeue.add(12);
-try dequeue.add(7);
+try dequeue.push(allocator, 54);
+try dequeue.push(allocator, 12);
+try dequeue.push(allocator, 7);
 
 // Add multiple
-try dequeue.addSlice(&[_]u32{ 1, 2, 3 });
+try dequeue.pushSlice(allocator, &[_]u32{ 1, 2, 3 });
 
 // Peek at min/max (doesn't remove)
 if (dequeue.peekMin()) |min| {
@@ -44,13 +46,9 @@ if (dequeue.peekMax()) |max| {
     std.debug.print("max: {}\n", .{max});
 }
 
-// Remove min/max
-const min = dequeue.removeMin();        // asserts non-empty
-const max = dequeue.removeMax();        // asserts non-empty
-
-// Safe removal (returns null if empty)
-const maybe_min = dequeue.removeMinOrNull();
-const maybe_max = dequeue.removeMaxOrNull();
+// Remove min/max (returns null if empty)
+const maybe_min = dequeue.popMin();
+const maybe_max = dequeue.popMax();
 
 // Size
 const n = dequeue.count();
@@ -60,23 +58,23 @@ const cap = dequeue.capacity();
 ## From Existing Slice
 
 ```zig
-// Take ownership of slice, heapify in place
-var items = try allocator.dupe(u32, &[_]u32{ 5, 3, 8, 1, 2 });
-var dequeue = PDQ.fromOwnedSlice(allocator, items, {});
-defer dequeue.deinit();
+// Take ownership of an already-allocated slice, heapify in place (no allocator needed)
+const items = try allocator.dupe(u32, &[_]u32{ 5, 3, 8, 1, 2 });
+var dequeue = PDQ.fromOwnedSlice(items, {});
+defer dequeue.deinit(allocator);
 ```
 
 ## Update Priority
 
 ```zig
 try dequeue.update(old_value, new_value);
-// Error if old_value not found
+// Returns error.ElementNotFound if old_value not found
 ```
 
 ## Remove by Index
 
 ```zig
-const removed = dequeue.removeIndex(index);
+const removed = dequeue.popIndex(index);
 ```
 
 ## Iteration
@@ -86,6 +84,7 @@ const removed = dequeue.removeIndex(index);
 var it = dequeue.iterator();
 while (it.next()) |elem| {
     // process elem
+    _ = elem;
 }
 it.reset();
 ```
@@ -93,9 +92,9 @@ it.reset();
 ## Capacity Management
 
 ```zig
-try dequeue.ensureTotalCapacity(100);
-try dequeue.ensureUnusedCapacity(10);
-dequeue.shrinkAndFree(new_capacity);
+try dequeue.ensureTotalCapacity(allocator, 100);
+try dequeue.ensureUnusedCapacity(allocator, 10);
+dequeue.shrinkAndFree(allocator, new_capacity);
 ```
 
 ## Context-Based Comparator
@@ -108,7 +107,7 @@ fn compareByScore(scores: []const u32, a: usize, b: usize) std.math.Order {
 const IndexPDQ = std.PriorityDequeue(usize, []const u32, compareByScore);
 
 const scores = [_]u32{ 50, 30, 80, 20 };
-var dequeue = IndexPDQ.init(allocator, &scores);
+var dequeue = IndexPDQ.initContext(&scores);
 ```
 
 ## Complete Example: Bounded Range Tracker
@@ -125,16 +124,17 @@ const RangePDQ = std.PriorityDequeue(i32, void, order);
 pub fn main() !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
-    var tracker = RangePDQ.init(gpa.allocator(), {});
-    defer tracker.deinit();
+    var tracker: RangePDQ = .empty;
+    defer tracker.deinit(allocator);
 
     // Add values
-    try tracker.add(10);
-    try tracker.add(5);
-    try tracker.add(20);
-    try tracker.add(3);
-    try tracker.add(15);
+    try tracker.push(allocator, 10);
+    try tracker.push(allocator, 5);
+    try tracker.push(allocator, 20);
+    try tracker.push(allocator, 3);
+    try tracker.push(allocator, 15);
 
     // Get range without removing
     const min = tracker.peekMin().?;  // 3
@@ -144,8 +144,8 @@ pub fn main() !void {
     std.debug.print("Range: {} to {} = {}\n", .{ min, max, range });
 
     // Pop from both ends
-    _ = tracker.removeMin();  // removes 3
-    _ = tracker.removeMax();  // removes 20
+    _ = tracker.popMin();  // removes 3
+    _ = tracker.popMax();  // removes 20
 
     // New range is 5 to 15
 }
@@ -163,7 +163,7 @@ pub fn main() !void {
 
 ## Notes
 
-- Both `removeMin()` and `removeMax()` are O(log n)
+- Both `popMin()` and `popMax()` are O(log n)
 - `peekMin()` is O(1), `peekMax()` is O(1) after first 2 elements
 - Iterator order is heap array order, not priority order
 - Use when you need efficient access to both extremes

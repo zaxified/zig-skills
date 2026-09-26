@@ -203,7 +203,7 @@ const testing = std.testing;
 test "example" {
     try testing.expectEqual(4, 2 + 2);
     try testing.expectEqualStrings("hello", "hello");
-    try testing.expect(condition);
+    try testing.expect(2 + 2 == 4);
 }
 
 test "with allocator" {

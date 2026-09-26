@@ -45,6 +45,12 @@ ZON is a data format using Zig's literal syntax:
 
 ## Parsing ZON
 
+**`fromSlice` vs `fromSliceAlloc`:** `fromSlice` asserts *at compile time* that `T` contains no
+pointers (so the result never needs freeing) — passing a type with a `[]const u8` field, for
+example, is a compile-time `unreachable`, not a runtime error. `fromSliceAlloc` allows pointers
+and heap-allocates them; free the result with `std.zon.parse.free`. Reach for `fromSliceAlloc`
+whenever `T` has string/slice fields, which is the common case.
+
 ### Parse into Struct (Runtime)
 
 ```zig
@@ -68,7 +74,9 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const config = try std.zon.parse.fromSlice(Config, allocator, zon_str, null, .{});
+    // `Config.name` is a slice (a pointer), so this needs `fromSliceAlloc`, not `fromSlice`:
+    // `fromSlice` asserts at compile time that T contains no pointers.
+    const config = try std.zon.parse.fromSliceAlloc(Config, allocator, zon_str, null, .{});
     defer std.zon.parse.free(allocator, config);
 
     // config.name == "server"
@@ -83,7 +91,7 @@ pub fn main() !void {
 var diag: std.zon.parse.Diagnostics = .{};
 defer diag.deinit(allocator);
 
-const result = std.zon.parse.fromSlice(Config, allocator, zon_str, &diag, .{}) catch |err| {
+const result = std.zon.parse.fromSliceAlloc(Config, allocator, zon_str, &diag, .{}) catch |err| {
     // Print diagnostic errors
     var errors = diag.iterateErrors();
     while (errors.next()) |parse_err| {
@@ -102,7 +110,7 @@ defer std.zon.parse.free(allocator, result);
 ### Parse Options
 
 ```zig
-const result = try std.zon.parse.fromSlice(T, allocator, zon_str, diag, .{
+const result = try std.zon.parse.fromSliceAlloc(T, allocator, zon_str, diag, .{
     // Ignore unknown fields (default: false - errors on unknown)
     .ignore_unknown_fields = true,
 
@@ -126,7 +134,7 @@ const version = build_zon.version;
 ### Free Parsed Values
 
 ```zig
-const result = try std.zon.parse.fromSlice(T, allocator, zon_str, null, .{});
+const result = try std.zon.parse.fromSliceAlloc(T, allocator, zon_str, null, .{});
 defer std.zon.parse.free(allocator, result);
 ```
 
@@ -160,6 +168,7 @@ pub fn main() !void {
 
     try std.zon.stringify.serialize(config, .{}, &aw.writer);
     const zon_str = aw.written();
+    std.debug.print("{s}\n", .{zon_str});
     // .{
     //     .name = "server",
     //     .port = 8080,
@@ -408,7 +417,7 @@ fn loadConfig(allocator: std.mem.Allocator, path: []const u8) !Config {
     );
     defer allocator.free(content);
 
-    return std.zon.parse.fromSlice(Config, allocator, content, null, .{
+    return std.zon.parse.fromSliceAlloc(Config, allocator, content, null, .{
         .ignore_unknown_fields = true,
         .free_on_error = true,
     });
@@ -482,6 +491,6 @@ fn roundTrip(comptime T: type, allocator: std.mem.Allocator, value: T) !T {
     const terminated: [:0]const u8 = zon_str[0 .. zon_str.len - 1 :0];
 
     // Parse back
-    return std.zon.parse.fromSlice(T, allocator, terminated, null, .{});
+    return std.zon.parse.fromSliceAlloc(T, allocator, terminated, null, .{});
 }
 ```

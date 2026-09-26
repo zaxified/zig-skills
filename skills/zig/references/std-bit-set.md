@@ -190,7 +190,7 @@ pub fn main() void {
     grant(&user_perms, .read);
     grant(&user_perms, .write);
 
-    var admin_perms = Permissions.initFull();
+    const admin_perms = Permissions.initFull();
 
     // Check if user has all admin permissions
     if (user_perms.subsetOf(admin_perms)) {

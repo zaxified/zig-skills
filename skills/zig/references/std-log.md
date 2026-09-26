@@ -19,6 +19,9 @@ const std = @import("std");
 const log = std.log;
 
 pub fn main() void {
+    const x: u32 = 42;
+    const e = error.ConnectionRefused;
+
     log.info("Starting application", .{});
     log.debug("Debug value: {}", .{x});  // Hidden in release builds
     log.warn("Config missing, using defaults", .{});
