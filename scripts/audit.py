@@ -69,7 +69,7 @@ URL_DOMAINS = {
     "wtf-8.codeberg.page", "simonkagstrom.github.io", "json.org", "www.json.org",
     "unicode.org", "www.unicode.org", "kernel.org", "www.kernel.org", "sqlite.org",
     "www.sqlite.org", "cdn.jsdelivr.net", "docs.anthropic.com", "code.claude.com",
-    "keepachangelog.com", "opensource.org", "lwn.net", "claude.ai", "www.swift.org",
+    "keepachangelog.com", "opensource.org", "lwn.net", "claude.ai", "www.swift.org", "img.shields.io",
 }
 
 # (rule, regex, message). Checked line by line over every audited file,
@@ -354,7 +354,7 @@ class Audit:
                     self.hit(r, n, "markup", "HTML comment (hidden text)", line)
                 if HTML_TAG.search(line):
                     self.hit(r, n, "markup", "raw HTML", line)
-                if IMAGE.search(line):
+                if IMAGE.search(line) and not (r == "README.md" and _badge_only(line)):
                     self.hit(r, n, "markup", "image (renders remote content, can leak through its URL)", line)
                 if REF_DEF.match(line):
                     self.hit(r, n, "markup", "reference-style link definition (invisible when rendered)", line)
@@ -422,6 +422,20 @@ class Audit:
             self.hit(r, n, "url", f"domain not on allowlist: {host}", line)
         if "?" in url:
             self.hit(r, n, "url", f"query string in URL: {url[:80]}", line)
+
+
+# README badges only: images there come from these fixed prefixes and carry no
+# query string. GitHub serves README images through its own proxy; the skill
+# payload itself may never contain an image.
+BADGE_PREFIXES = ("https://img.shields.io/badge/", "https://img.shields.io/github/",
+                  "https://github.com/zaxified/zig-skills/actions/workflows/")
+BADGE_IMAGE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)")
+
+
+def _badge_only(line):
+    urls = BADGE_IMAGE.findall(line)
+    return bool(urls) and len(urls) == len(IMAGE.findall(line)) and all(
+        u.startswith(BADGE_PREFIXES) and "?" not in u for u in urls)
 
 
 def _example_host(host):

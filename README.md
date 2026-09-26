@@ -1,5 +1,8 @@
 # zig-skills
 
+[![gate](https://github.com/zaxified/zig-skills/actions/workflows/gate.yml/badge.svg)](https://github.com/zaxified/zig-skills/actions/workflows/gate.yml) [![Zig 0.16.0](https://img.shields.io/badge/Zig-0.16.0-f7a41d)](https://ziglang.org/download/) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Scanned by NVIDIA SkillSpector](https://img.shields.io/badge/scanned_by-NVIDIA_SkillSpector-76b900)](https://github.com/NVIDIA/SkillSpector) [![Audited releases](https://img.shields.io/badge/releases-audited-2ea44f)](audits/) [![Latest release](https://img.shields.io/github/v/tag/zaxified/zig-skills)](https://github.com/zaxified/zig-skills/tags)
+
 An agent skill for **Zig 0.16.0**: the current std and build-system APIs, migration notes
 from 0.14/0.15, and gotchas found in production code. Every release is audited so that
 nothing in it can turn against the agent, or the person, using it.
