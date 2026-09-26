@@ -195,6 +195,17 @@ hmac.final(&mac);
 
 Available: `HmacMd5`, `HmacSha1`, `HmacSha224`, `HmacSha256`, `HmacSha384`, `HmacSha512`
 
+**Verifying a MAC, tag or token:** compare in constant time. `std.mem.eql` returns at the
+first differing byte, which leaks how much of a forged value was right.
+
+```zig
+var expected: [HmacSha256.mac_length]u8 = undefined;
+HmacSha256.create(&expected, message, key);
+if (!std.crypto.timing_safe.eql([HmacSha256.mac_length]u8, expected, received_mac)) {
+    return error.AuthenticationFailed;
+}
+```
+
 ### SipHash
 
 Fast MAC for hash table keying (not for general authentication):

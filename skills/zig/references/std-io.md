@@ -415,8 +415,9 @@ const argv = try init.minimal.args.toSlice(arena); // []const [:0]const u8 (argv
 ### Read a whole file — through the `Io` instance
 
 ```zig
-const data = try std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .unlimited);
+const data = try std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(16 * 1024 * 1024));
 defer gpa.free(data);
+// Pick a cap for files you do not control; .unlimited lets any large file exhaust memory.
 // signature: Dir.readFileAlloc(dir, io, sub_path, gpa, limit). Io.Limit: .unlimited / .limited(n).
 // Dir/File now live under std/Io/ (std.Io.Dir, std.Io.File); std.fs is reorganized.
 ```
