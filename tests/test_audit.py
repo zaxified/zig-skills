@@ -164,7 +164,7 @@ class EachRuleFires(unittest.TestCase):
         "secret": [
             "token = ghp_" + "a" * 36,
             "key = AKIA" + "A" * 16,
-            "-----BEGIN OPENSSH PRIVATE KEY-----",
+            "-----BEGIN OPENSSH " + "PRIVATE KEY-----",  # split so the file holds no literal key header
         ],
         "blob": ["A" * 200],
         "advice": [

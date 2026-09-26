@@ -30,24 +30,7 @@ jobs:
       - name: Release safety gate
         run: python3 scripts/audit.py
       - name: Secret scan over the full history
-        run: |
-          # Same secret patterns as the gate, applied to every blob ever committed.
-          python3 - <<'PY'
-          import re, subprocess, sys
-          sys.path.insert(0, "scripts")
-          from audit import SECRET
-          objs = subprocess.run(["git", "rev-list", "--objects", "--all"], capture_output=True, text=True, check=True).stdout
-          bad = 0
-          for line in objs.splitlines():
-              sha = line.split()[0]
-              if subprocess.run(["git", "cat-file", "-t", sha], capture_output=True, text=True).stdout.strip() != "blob":
-                  continue
-              data = subprocess.run(["git", "cat-file", "-p", sha], capture_output=True).stdout.decode("utf-8", "replace")
-              for pat, msg in SECRET:
-                  if re.search(pat, data):
-                      print(f"{msg} in blob {sha} ({line[41:]})"); bad += 1
-          sys.exit(1 if bad else 0)
-          PY
+        run: python3 scripts/scan-history.py
 
   skillspector:
     name: NVIDIA SkillSpector (independent scanner)
