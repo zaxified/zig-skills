@@ -42,8 +42,18 @@ import unicodedata
 # are reviewed as code; they never reach a consumer's agent.
 PAYLOAD_DIR = "skills/zig"
 AUDITED_EXTRA = ["README.md", "CLAUDE.md", "LICENSE", ".claude-plugin"]
+# Files our own reviewers and maintainers read. They describe attacks and quote
+# suspicious text on purpose, so wording rules do not apply; hidden text,
+# secrets, blobs and links do. Not part of the release content id.
+META_FILES = ["THIRD_PARTY.md", "audit", "audits"]
+META_RULES = {"unicode", "markup", "url", "secret", "blob", "files"}
 
 MAX_FILE_BYTES = 256 * 1024
+
+# Paths Claude Code loads from a plugin root by itself (code.claude.com plugin
+# components reference), plus the project configuration directory.
+PLUGIN_COMPONENTS = ["agents", "bin", "commands", "hooks", "monitors", "output-styles", "themes",
+                     "workflows", ".mcp.json", ".lsp.json", "settings.json", ".claude"]
 
 SKILL_KEYS = {"name", "description", "license", "compatibility", "metadata"}
 PLUGIN_KEYS = {"name", "version", "description", "author", "homepage", "repository",
@@ -180,6 +190,7 @@ class Audit:
     def __init__(self, root):
         self.root = root
         self.findings = []  # (path, line, rule, msg, hash)
+        self.meta_mode = False
         self.allow = self.load_allow()
         self.used = set()
 
@@ -202,6 +213,8 @@ class Audit:
         return allow
 
     def hit(self, path, n, rule, msg, line=""):
+        if self.meta_mode and rule not in META_RULES:
+            return
         h = line_hash(line) if line else ""
         key = (path, rule, h)
         if h and key in self.allow:
@@ -211,9 +224,9 @@ class Audit:
 
     # ---- walkers ----
 
-    def audited_files(self):
+    def audited_files(self, bases=None):
         out = []
-        for base in [PAYLOAD_DIR] + AUDITED_EXTRA:
+        for base in bases or [PAYLOAD_DIR] + AUDITED_EXTRA:
             p = os.path.join(self.root, base)
             if os.path.islink(p):
                 out.append(p)
@@ -226,8 +239,34 @@ class Audit:
                 out.append(p)
         return out
 
+    def check_layout(self):
+        """The marketplace publishes the repository root as the plugin, and Claude
+        Code loads these paths from a plugin root on its own. Any of them would
+        grant execution (hooks, MCP/LSP servers, bin/ on PATH, agents, ...)
+        without passing through the payload checks. .claude/ would configure
+        every session opened in a clone of this repository."""
+        for name in PLUGIN_COMPONENTS:
+            if os.path.lexists(os.path.join(self.root, name)):
+                self.hit(name, 0, "layout", "auto-loaded plugin component path must not exist at the repository root")
+        skills = os.path.join(self.root, "skills")
+        if os.path.isdir(skills):
+            for entry in sorted(os.listdir(skills)):
+                if entry != "zig":
+                    self.hit(f"skills/{entry}", 0, "layout", "only skills/zig is published")
+
     def run(self):
-        for p in self.audited_files():
+        self.check_layout()
+        for meta, files in ((False, self.audited_files()), (True, self.audited_files(META_FILES))):
+            self.meta_mode = meta
+            self.scan_files(files)
+        self.meta_mode = False
+        for key, n in self.allow.items():
+            if key not in self.used:
+                self.findings.append(("audit/allow.txt", n, "allow", f"stale entry, matches nothing: {key[0]} {key[1]} {key[2]}", ""))
+        return self.findings
+
+    def scan_files(self, files):
+        for p in files:
             r = rel(self.root, p)
             st = os.lstat(p)
             if stat.S_ISLNK(st.st_mode):
@@ -256,10 +295,6 @@ class Audit:
             if r == PAYLOAD_DIR + "/SKILL.md":
                 self.check_frontmatter(r, text)
             self.check_text(r, text, markdown=r.endswith(".md"))
-        for key, n in self.allow.items():
-            if key not in self.used:
-                self.findings.append(("audit/allow.txt", n, "allow", f"stale entry, matches nothing: {key[0]} {key[1]} {key[2]}", ""))
-        return self.findings
 
     # ---- checks ----
 
@@ -377,7 +412,7 @@ class Audit:
             self.hit(r, n, "url", f"scheme not allowed: {url[:60]}", line)
             return
         host = m.group(2).lower()
-        if in_code and _example_host(host):
+        if (in_code or self.meta_mode) and _example_host(host):
             # Test data in an example (URI parsing, a request builder): not a
             # link anyone follows, and reserved names resolve nowhere.
             return
