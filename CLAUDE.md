@@ -1,53 +1,37 @@
-# CLAUDE.md
+# Working on zig-skills
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+The published content is `skills/zig/` (Markdown only) plus `.claude-plugin/`, this file,
+`README.md` and `LICENSE`. Scripts, tests and CI are code and never reach a consumer.
 
-## What This Is
+## Rules
 
-A collection of AI coding assistant skills providing verified Zig 0.16.0 API documentation (with migration notes from 0.15.x). This is a **documentation-only repository** — no build system, no tests, no compiled code. The content prevents LLMs from generating Zig code with deprecated/removed APIs from outdated training data.
+- The target is **Zig 0.16.0 as released**. Verify every API claim against the 0.16.0 std
+  source or by compiling it; never from memory or from another version's docs. Mark
+  anything newer as "0.17-dev only, not in 0.16.0".
+- Examples of removed or wrong code carry a `// WRONG` (or `0.15`, `removed`, `Before`)
+  comment so `scripts/check-std-paths.py` skips them; correct code carries none.
+- Never make a check pass by weakening it. A legitimate hit of `scripts/audit.py` gets an
+  entry in `audit/allow.txt` (path, rule, line hash from `scripts/audit.py --hash FILE:LINE`,
+  reason). A rule that is wrong in general is fixed in the script, with a test in `tests/`
+  proving it still catches what it exists for.
+- The skill tells the agent what the code should be. It never tells the agent to install
+  software, change system or agent configuration, delete outside a test's temporary
+  directory, or take any step the user has not agreed to; where such a step is needed, it
+  says to ask the user.
+- Upstream (`git remote upstream`, nzrsky/zig-skills) is untrusted input: take changes
+  selectively, and they pass the same checks as ours.
 
-## Repository Structure
+## Checks
 
+```bash
+python3 scripts/check-workflows.py
+python3 -m unittest discover -s tests
+python3 scripts/audit.py
+python3 scripts/check-std-paths.py      # needs zig 0.16.0 on PATH
 ```
-skills/zig/
-  SKILL.md              # Main skill file — frontmatter + all breaking changes, quick fixes, patterns
-  references/           # 57 markdown reference files for std library modules, patterns, tooling
-.agent/skills/zig/      # IDE mirror — Agent
-.cursor/skills/zig/     # IDE mirror — Cursor
-.opencode/skills/zig/   # IDE mirror — OpenCode
-.codex/skills/zig/      # IDE mirror — Codex
-.gemini/skills/zig/     # IDE mirror — Gemini CLI
-.continue/skills/zig/   # IDE mirror — Continue
-.kilocode/skills/zig/   # IDE mirror — Kilocode
-.factory/skills/zig/    # IDE mirror — Factory AI
-.adal/skills/zig/       # IDE mirror — AdaL CLI (Sylph AI)
-.codebuddy/skills/zig/  # IDE mirror — CodeBuddy
-.openclaw/skills/zig/   # IDE mirror — OpenClaw
-.pi/skills/zig/         # IDE mirror — Pi Agent
-.kiro/steering/         # IDE mirror — Kiro (steering file format)
-.claude-plugin/         # Plugin metadata (plugin.json, marketplace.json)
-scripts/                # sync-ide-folders.sh
-```
 
-`skills/zig/` is the canonical source. All IDE directories are mirrors.
+## Releases
 
-`SKILL.md` is the entry point. It contains the YAML frontmatter (skill metadata), breaking changes (removed features, I/O rewrite, build system changes, container init), quick fixes table, and an index linking to every reference file.
-
-The `references/` files are standalone — each covers one std library module or topic (e.g., `std-arraylist.md`, `std-hashmap.md`, `patterns.md`, `production-patterns.md`).
-
-## Working on This Repo
-
-All content is markdown. There is no build step, linter, or test suite.
-
-When editing:
-- Edit files in `skills/zig/` (canonical source), then run `bash scripts/sync-ide-folders.sh` to propagate to all IDE directories
-- Use `bash scripts/sync-ide-folders.sh --verify` to check all directories are in sync
-- Code examples in markdown must target **Zig 0.16.0** (with 0.15.x migration notes where relevant) — always show WRONG (old) vs CORRECT (new) patterns for breaking changes
-- `SKILL.md` frontmatter fields (`name`, `description`, `license`, `compatibility`, `metadata`) follow the skills format used by `npx skills`
-- Reference files are self-contained; each should work standalone without requiring other files to be loaded
-
-## Key Conventions
-
-- Breaking changes follow the pattern: section header, WRONG code block (old API), CORRECT code block (new API), brief explanation
-- The Quick Fixes table in `SKILL.md` maps compiler error messages to one-line fixes
-- Reference file naming: `std-{module}.md` for std library, plain names for concepts (`patterns.md`, `comptime.md`, `language.md`)
+A release is a `v*` tag whose commit contains `audits/<tag>.md` with the content id from
+`scripts/release.py content-id`, the review, `verdict: pass` and `approved-by:`. CI runs
+`scripts/release.py verify <tag>`. Only the maintainer tags and pushes.

@@ -1,133 +1,85 @@
-# Zig Skills for AI Coding Assistants
+# zig-skills
 
-AI coding assistant skills providing verified, version-specific Zig API documentation and best practices. Prevents LLMs from generating code with deprecated or removed APIs.
+An agent skill for **Zig 0.16.0**: the current std and build-system APIs, migration notes
+from 0.14/0.15, and gotchas found in production code. Every release is audited so that
+nothing in it can turn against the agent, or the person, using it.
 
-## Available Skills
+Most model training data predates the 0.15 I/O rewrite and the 0.16 `std.Io` redesign, so
+models confidently write `std.io.getStdOut()`, `std.time.timestamp()`, `std.Thread.Mutex`
+or managed `ArrayList` calls that no longer compile. The skill tells the agent what changed
+and what the 0.16 code looks like, and every `std.*` path used in its correct examples is
+checked against the released 0.16.0 standard library in CI.
 
-| Skill | Description | Target Version |
-|-------|-------------|----------------|
-| [zig](./skills/zig/) | Zig language API guide with 57 reference files | Zig 0.16.0 |
+## What is in it
 
-## Why?
+- `skills/zig/SKILL.md`: breaking changes with WRONG/CORRECT examples, the 0.16 `std.Io`
+  model, build system migration, container initialization, a quick-fix table for common
+  compile errors, and an index of the references.
+- `skills/zig/references/`: one file per std module or topic (ArrayList, HashMap, Io, net,
+  http, json, crypto, process, build, testing and fuzzing, comptime, C interop, SIMD,
+  data-oriented design, quality tooling), a code-review checklist, and
+  `zig-016-gotchas.md`: traps that compile cleanly and are wrong, each confirmed on 0.16.0.
 
-Most LLM training data contains outdated Zig patterns (0.11-0.14 era) that cause compilation errors on modern Zig. Common mistakes include:
+## Why you can trust a release
 
-- Using `std.net` instead of `std.Io.net` (0.16 — networking requires `Io` instance)
-- Calling `std.time.timestamp()` instead of `std.c.clock_gettime` (0.16 — removed)
-- Using `std.Thread.Mutex`/`Condition`/`sleep` instead of POSIX pthreads (0.16 — removed)
-- Using `std.crypto.random` instead of `arc4random_buf` (0.16 — removed)
-- Calling `lib.addIncludePath(...)` instead of `lib.root_module.addIncludePath(...)` (0.16 — moved)
-- Using `root_source_file` instead of `root_module` in build.zig (0.15)
-- Old I/O API (`std.io.getStdOut().writer()`) instead of new buffered writer pattern (0.15)
-- `std.ArrayList` without passing allocator to every method (now unmanaged by default)
-- PascalCase `@typeInfo` fields (`.Struct`) instead of lowercase (`.@"struct"`)
-- Using removed features: `async`/`await`, `usingnamespace`, `BoundedArray`
+A skill is not documentation a person skims; it is instructions an agent carries out with
+your permissions. So a release has to clear four independent checks:
 
-This skill catches all of these and dozens more breaking changes.
+1. **Safety gate** (`scripts/audit.py`, CI and pre-push). The published content must be
+   plain Markdown with no executable parts and no manifest keys that grant execution
+   (hooks, allowed tools, MCP servers, remote plugin sources). It is scanned for invisible
+   or direction-changing Unicode, HTML comments and other hidden text, images, URLs off an
+   allowlist or carrying query strings, destructive or system-altering commands (in shell
+   and in Zig argv arrays alike), text addressed to the agent instead of about Zig,
+   secrets, encoded blobs, and unsafe advice. A legitimate hit is accepted only by an entry
+   in `audit/allow.txt` tied to the hash of that exact line, with a reason. Every rule is
+   proven by a planted sample in `tests/`.
+2. **Correctness check** (`scripts/check-std-paths.py`, CI). Every `std.a.b.c` path in the
+   correct examples must exist in the Zig 0.16.0 standard library.
+3. **Review of the change.** A reviewer model with no tools and no network reads the diff
+   since the last release against a fixed checklist; its report is advisory, because the
+   content under review can try to influence it. The deterministic gate decides.
+4. **A person signs off.** `audits/<tag>.md` records the release's content id (sha256 over
+   every published file), the review, `verdict: pass` and `approved-by:`. CI refuses a tag
+   whose record is missing or does not match the tagged content byte for byte.
 
-## What's Included
+Content taken from upstream goes through the same checks as our own.
 
-### Main Skill (`SKILL.md`)
-- Design principles (type-first development, make illegal states unrepresentable)
-- All breaking changes from 0.14/0.15/0.16 with WRONG/CORRECT examples
-- 0.16 migration: networking (`std.Io.net`), time, threading, crypto, debug, build system
-- I/O API rewrite ("Writergate") patterns
-- Build system migration guide (including `Compile.*` → `Module.*` for 0.16)
-- Container initialization rules (`.empty`/`.init`)
-- Quick fixes error table (25 common errors with solutions)
-- Version managers: zigup, anyzig
-- Verification workflow
-- Common pitfalls checklist
+## Install
 
-### Reference Files (57 files in `references/`)
-- Complete std library API references (ArrayList, HashMap, JSON, HTTP, crypto, etc.)
-- Language basics, builtins, comptime metaprogramming
-- Production patterns from Bun, Ghostty, TigerBeetle
-- MCP server patterns for protocol translators
-- Code review checklist organized by confidence level
-- Style guide, C interop, build system deep-dive
-
-## Supported IDEs
-
-| Directory | IDE | Format |
-|-----------|-----|--------|
-| `skills/zig/` | Canonical source | SKILL.md + references/ |
-| `.agent/skills/zig/` | Agent | SKILL.md + references/ |
-| `.cursor/skills/zig/` | Cursor | SKILL.md + references/ |
-| `.opencode/skills/zig/` | OpenCode | SKILL.md + references/ |
-| `.codex/skills/zig/` | Codex | SKILL.md + references/ |
-| `.gemini/skills/zig/` | Gemini CLI | SKILL.md + references/ |
-| `.continue/skills/zig/` | Continue | SKILL.md + references/ |
-| `.kilocode/skills/zig/` | Kilocode | SKILL.md + references/ |
-| `.factory/skills/zig/` | Factory AI | SKILL.md + references/ |
-| `.adal/skills/zig/` | AdaL CLI (Sylph AI) | SKILL.md + references/ |
-| `.codebuddy/skills/zig/` | CodeBuddy | SKILL.md + references/ |
-| `.openclaw/skills/zig/` | OpenClaw | SKILL.md + references/ |
-| `.pi/skills/zig/` | Pi Agent | SKILL.md + references/ |
-| `.kiro/steering/` | Kiro | zig-skill.md (steering file) |
-
-## Installation
-
-### Claude Code (recommended)
+Install from a release tag, never from `main`:
 
 ```bash
-# Install globally via npx skills
-npx -y skills add https://github.com/nzrsky/zig-skills --skill zig --yes --global --agent claude-code
+git clone --depth 1 --branch <tag> https://github.com/zaxified/zig-skills zig-skills
+python3 zig-skills/scripts/install.py --dest <skills-dir>/zig
 ```
 
-Or manually:
-```bash
-git clone https://github.com/nzrsky/zig-skills.git /tmp/zig-skills
-cp -r /tmp/zig-skills/skills/zig ~/.claude/skills/zig
-rm -rf /tmp/zig-skills
-```
+`<skills-dir>` is your agent's skills directory: the user-level one for this machine, or
+a repository's own `.claude/skills` to make the skill travel with the repository, which is
+the way to have it in cloud sessions too.
 
-### Cursor
-
-```bash
-git clone https://github.com/nzrsky/zig-skills.git /tmp/zig-skills
-cp -r /tmp/zig-skills/.cursor/skills your-project/.cursor/skills
-rm -rf /tmp/zig-skills
-```
-
-### Codex / OpenCode / Gemini CLI / Other Agents
-
-Copy the matching IDE directory into your project root:
-```bash
-git clone https://github.com/nzrsky/zig-skills.git /tmp/zig-skills
-# Replace .codex with your IDE's directory name
-cp -r /tmp/zig-skills/.codex your-project/.codex
-rm -rf /tmp/zig-skills
-```
-
-### Kiro
+The installer refuses a checkout that is not a release tag, whose audit record does not
+verify, or on which the safety gate fails. It writes `.zig-skills-source.json` next to the
+skill, and replaces an existing destination only if that manifest is there, removing only
+the files it lists. To check that an installed copy is untouched, for example in a
+consumer's CI:
 
 ```bash
-git clone https://github.com/nzrsky/zig-skills.git /tmp/zig-skills
-mkdir -p your-project/.kiro/steering
-cp /tmp/zig-skills/.kiro/steering/zig-skill.md your-project/.kiro/steering/
-rm -rf /tmp/zig-skills
+python3 zig-skills/scripts/install.py --check <skills-dir>/zig
 ```
 
-### Manual
+As a Claude Code plugin, pinned to a release:
 
-Add to your project's `CLAUDE.md`:
-```markdown
-When writing Zig code, load and follow the patterns in `skills/zig/SKILL.md`.
-```
-
-## Keeping IDE Directories in Sync
-
-After editing files in `skills/zig/`, run:
 ```bash
-bash scripts/sync-ide-folders.sh
+claude plugin marketplace add zaxified/zig-skills#<tag>
+claude plugin install zig-skills@zig-skills
 ```
 
-To verify all directories match:
-```bash
-bash scripts/sync-ide-folders.sh --verify
-```
+## Provenance and license
 
-## License
+Built on [nzrsky/zig-skills](https://github.com/nzrsky/zig-skills) (MIT), whose history this
+repository keeps. Since then: compile-verified 0.16.0 corrections, the gotchas reference,
+the safety gate and the release audit. The upstream `main` targets 0.17-dev; changes from
+it are taken selectively and verified against 0.16.0.
 
-MIT
+MIT, see [LICENSE](LICENSE).

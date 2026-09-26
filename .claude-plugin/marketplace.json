@@ -1,26 +1,12 @@
 {
-  "listing": {
-    "title": "Zig Skills for AI Coding Assistants",
-    "tagline": "Verified Zig 0.16.0 API documentation that prevents outdated pattern generation",
-    "category": "programming-language",
-    "tags": ["zig", "systems-programming", "build-system", "comptime"],
-    "icon": "https://ziglang.org/zig-logo.svg"
-  },
-  "compatibility": {
-    "agents": [
-      "claude-code",
-      "cursor",
-      "opencode",
-      "codex",
-      "gemini-cli",
-      "continue",
-      "kilocode",
-      "factory-ai",
-      "adal-cli",
-      "codebuddy",
-      "openclaw",
-      "pi-agent",
-      "kiro"
-    ]
-  }
+  "name": "zig-skills",
+  "owner": { "name": "zaxified" },
+  "description": "Audited Zig skills. Pin a release: claude plugin marketplace add zaxified/zig-skills#<tag>",
+  "plugins": [
+    {
+      "name": "zig-skills",
+      "source": "./",
+      "description": "Audited Zig 0.16.0 skill: current std and build-system APIs, migration notes, and production gotchas."
+    }
+  ]
 }

@@ -1,24 +1,9 @@
 {
   "name": "zig-skills",
-  "version": "0.16.0",
-  "description": "Up-to-date Zig programming language patterns for version 0.16.0. Prevents LLMs from generating code with deprecated or removed APIs from outdated training data.",
-  "author": "Nazavtra",
-  "repository": "https://github.com/nzrsky/zig-skills",
+  "description": "Audited Zig 0.16.0 skill: current std and build-system APIs, migration notes, and gotchas found in production code. Every release passes a safety gate and a recorded audit.",
+  "author": { "name": "zaxified" },
+  "homepage": "https://github.com/zaxified/zig-skills",
+  "repository": "https://github.com/zaxified/zig-skills",
   "license": "MIT",
-  "keywords": [
-    "zig",
-    "programming-language",
-    "build-system",
-    "comptime",
-    "std-library"
-  ],
-  "skills": [
-    {
-      "name": "zig",
-      "path": "skills/zig/SKILL.md",
-      "language": "zig",
-      "category": "programming-language",
-      "version": "0.16.0"
-    }
-  ]
+  "keywords": ["zig", "zig-0.16", "build-system", "comptime", "std-library"]
 }
