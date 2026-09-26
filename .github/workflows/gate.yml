@@ -1,0 +1,77 @@
+name: gate
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  safety:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Workflow hygiene
+        run: python3 scripts/check-workflows.py
+      - name: Gate tests (every rule fires on a planted sample)
+        run: python3 -W error::ResourceWarning -m unittest discover -s tests
+      - name: Release safety gate
+        run: python3 scripts/audit.py
+      - name: Secret scan over the full history
+        run: |
+          # Same secret patterns as the gate, applied to every blob ever committed.
+          python3 - <<'PY'
+          import re, subprocess, sys
+          sys.path.insert(0, "scripts")
+          from audit import SECRET
+          objs = subprocess.run(["git", "rev-list", "--objects", "--all"], capture_output=True, text=True, check=True).stdout
+          bad = 0
+          for line in objs.splitlines():
+              sha = line.split()[0]
+              if subprocess.run(["git", "cat-file", "-t", sha], capture_output=True, text=True).stdout.strip() != "blob":
+                  continue
+              data = subprocess.run(["git", "cat-file", "-p", sha], capture_output=True).stdout.decode("utf-8", "replace")
+              for pat, msg in SECRET:
+                  if re.search(pat, data):
+                      print(f"{msg} in blob {sha} ({line[41:]})"); bad += 1
+          sys.exit(1 if bad else 0)
+          PY
+
+  std-paths:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      ZIG_VERSION: 0.16.0
+      ZIG_SHA256: 70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Zig (checksum-pinned)
+        run: |
+          curl -sSfL --proto '=https' -o zig.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
+          echo "${ZIG_SHA256}  zig.tar.xz" | sha256sum -c -
+          tar -xJf zig.tar.xz
+          echo "$PWD/zig-x86_64-linux-${ZIG_VERSION}" >> "$GITHUB_PATH"
+      - name: Every std path in the examples exists in Zig 0.16.0
+        run: python3 scripts/check-std-paths.py
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [safety, std-paths]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Tag carries a passing audit record for exactly its content
+        run: python3 scripts/release.py verify "$GITHUB_REF_NAME"
