@@ -36,9 +36,10 @@ your permissions. So a release has to clear four independent checks:
    proven by a planted sample in `tests/`.
 2. **Correctness check** (`scripts/check-std-paths.py`, CI). Every `std.a.b.c` path in the
    correct examples must exist in the Zig 0.16.0 standard library.
-3. **Review of the change.** A reviewer model with no tools and no network reads the diff
-   since the last release against a fixed checklist; its report is advisory, because the
-   content under review can try to influence it. The deterministic gate decides.
+3. **Review of the change.** A reviewer model with read-only tools goes through the diff
+   since the last release against a fixed checklist (`audit/REVIEW.md`). Its report is
+   advisory, because the content under review can try to influence it; the deterministic
+   gate decides.
 4. **A person signs off.** `audits/<tag>.md` records the release's content id (sha256 over
    every published file), the review, `verdict: pass` and `approved-by:`. CI refuses a tag
    whose record is missing or does not match the tagged content byte for byte.
