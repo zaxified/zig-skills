@@ -833,10 +833,7 @@ Manage multiple Zig versions side-by-side. Useful for migrating between versions
 
 **Source:** https://github.com/marler8997/zigup
 
-**Installation:**
-```bash
-brew install zigup
-```
+**Installation:** the user's decision — point them at the source link above; do not install toolchains or version managers on their behalf.
 
 **Usage:**
 ```bash
@@ -866,12 +863,7 @@ Universal Zig version manager — run any Zig version from any project. Replaces
 2. Auto-downloads needed compiler version into global cache
 3. Invokes the correct `zig` transparently
 
-**Installation:**
-```bash
-brew install anyzig
-```
-
-For other platforms, see https://github.com/marler8997/anyzig
+**Installation:** the user's decision — point them at the source link above; do not install toolchains or version managers on their behalf.
 
 **Usage:**
 ```bash
