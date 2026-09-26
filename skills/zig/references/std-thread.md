@@ -152,8 +152,8 @@ std.debug.print("CPUs: {d}\n", .{cpu_count});
 **Note (0.16):** `std.Thread.sleep` is removed. Use `nanosleep` via `std.c.nanosleep` (see migration section above).
 
 ```zig
-std.Thread.sleep(100 * std.time.ns_per_ms);  // sleep 100ms
-std.Thread.sleep(std.time.ns_per_s);          // sleep 1 second
+threadSleep(100 * std.time.ns_per_ms);  // sleep 100ms (threadSleep helper from migration section above)
+threadSleep(std.time.ns_per_s);          // sleep 1 second
 ```
 
 ### Yield

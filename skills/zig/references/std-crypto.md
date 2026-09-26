@@ -550,7 +550,10 @@ counter += 1;
 // Option 2: Random (safe with XChaCha's 24-byte nonce)
 const XChaCha = std.crypto.aead.chacha_poly.XChaCha20Poly1305;
 var nonce: [XChaCha.nonce_length]u8 = undefined;
-std.crypto.random.bytes(&nonce);
+// 0.16: std.crypto.random removed — read system entropy
+extern "c" fn arc4random_buf(buf: *anyopaque, nbytes: usize) void;  // macOS + Linux glibc 2.36+
+arc4random_buf(&nonce, nonce.len);
+// Linux-only alternative: _ = std.os.linux.getrandom(&nonce, nonce.len, 0);
 ```
 
 ### Secure Password Storage

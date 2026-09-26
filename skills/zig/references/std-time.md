@@ -338,7 +338,7 @@ fn waitWithTimeout(timeout_ns: u64) !void {
 
         // 0.15.x: std.Thread.sleep
         // 0.16: Thread.sleep removed — use std.c.nanosleep instead
-        std.Thread.sleep(std.time.ns_per_ms);  // 1ms
+        threadSleep(std.time.ns_per_ms);  // 1ms (threadSleep helper defined above)
     }
 }
 ```
@@ -362,7 +362,7 @@ const RateLimiter = struct {
         if (self.last) |last| {
             const elapsed = now.since(last);
             if (elapsed < self.interval_ns) {
-                std.Thread.sleep(self.interval_ns - elapsed);
+                threadSleep(self.interval_ns - elapsed);  // threadSleep helper defined above
             }
         }
         self.last = std.time.Instant.now() catch null;

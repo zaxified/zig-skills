@@ -248,18 +248,20 @@ pub fn run(self: *McpServer) !void {
 
 ```zig
 pub const ZlsProcess = struct {
+    io: std.Io,
+    zls_path: []const u8,
     child: ?std.process.Child = null,
     restart_count: u32 = 0,
     max_restarts: u32 = 5,
 
     pub fn spawn(self: *ZlsProcess) !void {
         if (self.child != null) self.kill();
-        var child = std.process.Child.init(&.{self.zls_path}, self.allocator);
-        child.stdin_behavior = .Pipe;
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Pipe;
-        try child.spawn();
-        self.child = child;
+        self.child = try std.process.spawn(self.io, .{
+            .argv = &.{self.zls_path},
+            .stdin = .pipe,
+            .stdout = .pipe,
+            .stderr = .pipe,
+        });
     }
 
     pub fn restart(self: *ZlsProcess) !bool {
@@ -272,11 +274,11 @@ pub const ZlsProcess = struct {
 
     pub fn kill(self: *ZlsProcess) void {
         if (self.child) |*child| {
-            // Close stdin first → signals child to exit
-            if (child.stdin) |s| { s.close(); child.stdin = null; }
-            if (child.stdout) |s| { s.close(); child.stdout = null; }
-            if (child.stderr) |s| { s.close(); child.stderr = null; }
-            _ = child.wait() catch {};
+            // Close stdin first → signals child to exit, then drain the rest
+            if (child.stdin) |s| { s.close(self.io); child.stdin = null; }
+            if (child.stdout) |s| { s.close(self.io); child.stdout = null; }
+            if (child.stderr) |s| { s.close(self.io); child.stderr = null; }
+            _ = child.wait(self.io) catch {};
             self.child = null;
         }
     }
@@ -602,8 +604,8 @@ With `zig build test` pointing at `src/main.zig`, this comptime block forces all
 | Empty `.{}` serializes as `[]` not `{}` | Use `.{ .object = std.json.ObjectMap.init(alloc) }` |
 | `std.json.Value = .null` in properties | Breaks MCP client registration — always pass explicit object |
 | `u4` can't be left-shifted by 4 | Widen first: `@as(u8, val) << 4` |
-| `std.process.Child.Term` is PascalCase | `.Exited`, `.Signal`, `.Stopped`, `.Unknown` |
-| `std.process.Child.StdIo` is PascalCase | `.Pipe`, `.Inherit`, `.Ignore` |
+| `std.process.Child.Term` fields are lowercase (0.16) | `.exited`, `.signal`, `.stopped`, `.unknown` |
+| `SpawnOptions.StdIo` members are lowercase (0.16) | `.pipe`, `.inherit`, `.ignore`, `.close`, `.{ .file = f }` |
 | Pipe double-close after ownership transfer | Call `detachPipes()` to null out original references |
 | Reader thread blocks on closed pipe | Close pipes before `thread.join()` to unblock |
 | `"initialized"` notification needs `{}` | Use raw JSON string — auto-serialized `.{}` sends `[]` |

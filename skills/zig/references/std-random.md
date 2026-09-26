@@ -61,14 +61,18 @@ pub fn main() void {
 ```zig
 const std = @import("std");
 
+// std.crypto.random is removed in 0.16 — read system entropy directly.
+// Portable (macOS + Linux glibc 2.36+):
+//   extern "c" fn arc4random_buf(buf: *anyopaque, nbytes: usize) void;
 pub fn main() void {
-    // Use std.crypto.random for system entropy
-    const secure = std.crypto.random;
-
     var key: [32]u8 = undefined;
-    secure.bytes(&key);  // fill with cryptographically secure random bytes
+    _ = std.os.linux.getrandom(&key, key.len, 0);  // secure random bytes (Linux)
+    // Portable alternative: arc4random_buf(&key, key.len);
 
-    const token = secure.int(u64);
+    var token_bytes: [8]u8 = undefined;
+    _ = std.os.linux.getrandom(&token_bytes, token_bytes.len, 0);
+    const token = std.mem.readInt(u64, &token_bytes, .little);
+    _ = token;
 }
 ```
 
@@ -76,7 +80,9 @@ pub fn main() void {
 
 ```zig
 var seed: u64 = undefined;
-std.crypto.random.bytes(std.mem.asBytes(&seed));
+// 0.16: std.crypto.random removed — read system entropy (portable: arc4random_buf)
+const seed_bytes = std.mem.asBytes(&seed);
+_ = std.os.linux.getrandom(seed_bytes, seed_bytes.len, 0);
 var prng = std.Random.DefaultPrng.init(seed);
 ```
 
@@ -97,7 +103,8 @@ prng.jump();
 ```zig
 // Requires 32-byte secret seed
 var secret_seed: [std.Random.ChaCha.secret_seed_length]u8 = undefined;
-std.crypto.random.bytes(&secret_seed);
+// 0.16: std.crypto.random removed (portable: arc4random_buf(&secret_seed, secret_seed.len))
+_ = std.os.linux.getrandom(&secret_seed, secret_seed.len, 0);
 
 var csprng = std.Random.ChaCha.init(secret_seed);
 const random = csprng.random();
@@ -289,7 +296,9 @@ threadlocal var tls_prng: ?std.Random.DefaultPrng = null;
 fn getThreadRandom() std.Random {
     if (tls_prng == null) {
         var seed: u64 = undefined;
-        std.crypto.random.bytes(std.mem.asBytes(&seed));
+        // 0.16: std.crypto.random removed — read system entropy (portable: arc4random_buf)
+        const seed_bytes = std.mem.asBytes(&seed);
+        _ = std.os.linux.getrandom(seed_bytes, seed_bytes.len, 0);
         tls_prng = std.Random.DefaultPrng.init(seed);
     }
     return tls_prng.?.random();
@@ -339,7 +348,11 @@ fn generatePassword(random: std.Random, buf: []u8) void {
 
 // Usage
 var password: [16]u8 = undefined;
-generatePassword(std.crypto.random, &password);
+// 0.16: std.crypto.random removed — seed a CSPRNG from system entropy
+var seed: [std.Random.ChaCha.secret_seed_length]u8 = undefined;
+_ = std.os.linux.getrandom(&seed, seed.len, 0);
+var csprng = std.Random.ChaCha.init(seed);
+generatePassword(csprng.random(), &password);
 ```
 
 ### Gaussian Random with Box-Muller
@@ -388,7 +401,7 @@ const MyPrng = struct {
 
 - `DefaultPrng` is `Xoshiro256` - fast, high quality, not cryptographic
 - `DefaultCsprng` is `ChaCha` - cryptographically secure with forward secrecy
-- For crypto: use `std.crypto.random` which provides system entropy
+- For crypto: `std.crypto.random` is **removed in 0.16** — read system entropy via `arc4random_buf` (macOS + Linux glibc 2.36+) or `std.os.linux.getrandom` (Linux)
 - `uintLessThan`/`intRangeLessThan` may reject values (not constant-time)
 - Use biased variants (`*Biased`) for timing-sensitive applications
 - `jump()` on Xoshiro256 advances 2^128 steps for parallel streams

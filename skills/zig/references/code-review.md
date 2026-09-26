@@ -213,7 +213,7 @@ exe.root_module.addImport("helper", helper_mod);
 | `stdout.print(fmt, args)` | `stdout.print(fmt, args); stdout.flush()` | **flush required** |
 | `format(self, fmt, opts, writer)` | `format(self, *std.Io.Writer)` | Custom formatting |
 | `"{}"` for format methods | `"{f}"` for format methods | std.fmt |
-| `child.collectOutput(&stdout, ...)` | `child.collectOutput(allocator, &stdout, ...)` | std.process |
+| `child.collectOutput(&stdout, ...)` | `std.process.run(gpa, io, .{...})` → `RunResult{ term, stdout, stderr }`, or read `child.stdout.?` after `.stdout = .pipe` | `collectOutput` removed entirely in std.process |
 
 **Examples:**
 

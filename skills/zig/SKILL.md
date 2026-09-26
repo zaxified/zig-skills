@@ -111,7 +111,7 @@ defer stream.close(io);              // close() now takes io
 ### Io Runtime Setup
 ```zig
 // Create Io instance at startup, thread it through your program
-var threaded = std.Io.Threaded.init(std.heap.c_allocator);
+var threaded = std.Io.Threaded.init(std.heap.c_allocator, .{});  // init takes (gpa, options)
 var io: std.Io = threaded.io();
 ```
 
