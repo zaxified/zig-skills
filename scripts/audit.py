@@ -67,6 +67,7 @@ URL_DOMAINS = {
 COMMAND = [
     (r"\brm\s+(-[a-zA-Z]*[rRf][a-zA-Z]*\s+)+", "recursive/forced rm"),
     (r"\brmdir\s+--ignore", "rmdir ignoring errors"),
+    (r"\bfind\b[^\n|]*\s-(delete|exec\s+rm)\b|\bxargs\s+(-\S+\s+)*rm\b", "bulk deletion via find/xargs"),
     (r"\b(curl|wget)\b[^|\n]*\|\s*(sudo\s+)?(ba|z|fi|k)?sh\b", "pipe download into a shell"),
     (r"\b(curl|wget)\b[^\n]*\s-[a-zA-Z]*[oO]\b", "download to a file"),
     (r"\bsudo\b", "sudo"),
