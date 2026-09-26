@@ -70,7 +70,12 @@ COMMAND = [
     (r"\bfind\b[^\n|]*\s-(delete|exec\s+rm)\b|\bxargs\s+(-\S+\s+)*rm\b", "bulk deletion via find/xargs"),
     (r"\b(curl|wget)\b[^|\n]*\|\s*(sudo\s+)?(ba|z|fi|k)?sh\b", "pipe download into a shell"),
     (r"\b(curl|wget)\b[^\n]*\s-[a-zA-Z]*[oO]\b", "download to a file"),
-    (r"\bsudo\b", "sudo"),
+    (r"\b(sudo|doas|pkexec|run0)\b", "privilege elevation"),
+    (r"\b(python3?|node|perl|ruby|php|bash|sh|zsh|fish|pwsh|powershell)\s+-(c|e|E)\s", "inline interpreter code"),
+    (r"\bchmod\s+[+ugoa]*x\b", "makes a file executable"),
+    (r"\b(curl|wget)\b", "curl/wget (network transfer)"),
+    (r"\bgit\s+config\b|core\.hooksPath|\.git/hooks", "git configuration / hooks"),
+    (r"\b(npx|bunx|pnpm\s+dlx|yarn\s+dlx|uvx|pipx\s+run|go\s+run\s+\S+@)\b", "runs a downloaded package"),
     (r"\bsu\s+-", "su"),
     (r"\bgit\s+push\b", "git push"),
     (r"\bgit\s+(reset\s+--hard|clean\s+-[a-z]*f|checkout\s+--\s+\.|branch\s+-D|filter-branch|update-ref\s+-d)", "destructive git"),
@@ -85,7 +90,7 @@ COMMAND = [
     (r"~/\.ssh|\.ssh/(id_|authorized_keys)|~/\.(bash|zsh|fish)rc|\.profile\b|/etc/(passwd|shadow|sudoers|hosts)", "credentials or shell/system config"),
     (r"~/\.claude|\.claude/(settings|hooks|skills|agents|commands)|CLAUDE\.md|settings(\.local)?\.json|\.mcp\.json", "agent configuration"),
     (r"\b(nc|ncat|netcat|socat)\b\s+(-[a-z]*e|-[a-z]*l)|/dev/tcp/|\bbash\s+-i\b", "reverse shell / listener"),
-    (r"\b(eval|exec)\s*\$\(|\bbase64\s+(-d|--decode)\b[^\n]*\|", "decode-and-run"),
+    (r"\b(eval|exec)\s*\$\(|\bbase64\s+(-d|-D|--decode)\b", "decode (and run)"),
     (r"\benv\b\s*\||\bprintenv\b|\$\{?(AWS_|GITHUB_TOKEN|ANTHROPIC_API_KEY|OPENAI_API_KEY|NPM_TOKEN)", "environment / token harvesting"),
     (r"\bnpm\s+i(nstall)?\s+-g\b|\bpip3?\s+install\b|\bgo\s+install\b|\bcargo\s+install\b|\bbrew\s+install\b|\bapt(-get)?\s+install\b", "installs software"),
     # Zig APIs that delete or execute. Allowed only where the path is visibly
@@ -99,6 +104,9 @@ COMMAND = [
 AGENT = [
     (r"ignore\s+(all\s+|any\s+|the\s+)?(previous|prior|above|earlier|other)\s+(instructions|rules|guidance|prompts?)", "override instructions"),
     (r"(disregard|forget|override)\s+(your|all|the|any)\s+(instructions|rules|system|guidelines)", "override instructions"),
+    (r"(disregard|ignore|forget)\s+(everything|anything|all|what)\s*(\w+\s+){0,2}(above|before|previous|prior|else|earlier)|\bfollow\s+only\s+(this|these|the\s+following)", "override instructions"),
+    (r"^\W*(?-i:Assistant|Claude|Agent|Model|AI|LLM|Copilot)\s*[,:]\s", "addresses the agent directly"),
+    (r"\b(always|every\s+time|at\s+the\s+start\s+of|in\s+every|for\s+every)\s+(\w+\s+){0,3}(session|conversation|task|request)\b", "standing order for every session"),
     (r"system\s+prompt|developer\s+message|<\s*/?\s*(system|assistant|user|human)\s*>", "prompt-structure text"),
     (r"(do\s+not|don'?t|never)\s+(tell|inform|mention|show|reveal|report)\s+(this\s+)?(to\s+)?(the\s+)?(user|human|operator)", "conceal from the user"),
     (r"without\s+(asking|telling|informing|notifying|confirmation|permission|the\s+user)", "act without consent"),
@@ -144,6 +152,12 @@ ADVICE = [
 
 BLOB = re.compile(r"[A-Za-z0-9+/=_-]{160,}")
 URL = re.compile(r"\b(?:https?|ftp|file|data|javascript)://[^\s<>)\]`'\"]+|\b(?:data|javascript):[^\s)]+", re.I)
+# Hosts written without a scheme are still links an agent may follow.
+BARE_HOST = re.compile(r"(?<![\w@./-])(?:www\.|//)([a-z0-9-]+(?:\.[a-z0-9-]+)+)(?=[/\s)\]>.,;:]|$)", re.I)
+HTML_ENTITY = re.compile(r"&(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]{1,30});", re.I)
+FULLWIDTH = re.compile(r"[\uff01-\uff5e]")
+LATIN = re.compile(r"[A-Za-z]")
+CONFUSABLE_SCRIPT = re.compile(r"[\u0370-\u03ff\u0400-\u052f]")  # Greek, Cyrillic
 HTML_TAG = re.compile(r"<\s*/?\s*(script|iframe|img|a|div|span|details|summary|style|link|meta|object|embed|svg|form|input|base|br|p|table|pre|code)\b[^>]*>", re.I)
 IMAGE = re.compile(r"!\[[^\]]*\]\(")
 REF_DEF = re.compile(r"^\s{0,3}\[[^\]]+\]:\s*\S+")
@@ -309,6 +323,18 @@ class Audit:
                     self.hit(r, n, "markup", "image (renders remote content, can leak through its URL)", line)
                 if REF_DEF.match(line):
                     self.hit(r, n, "markup", "reference-style link definition (invisible when rendered)", line)
+            for h in BARE_HOST.finditer(line):
+                host = h.group(1).lower().rstrip(".")
+                if host not in URL_DOMAINS and not _example_host(host) and not URL.search(line[max(0, h.start() - 8):h.end()]):
+                    self.hit(r, n, "url", f"scheme-less host not on allowlist: {host}", line)
+            if markdown and not in_code and HTML_ENTITY.search(line):
+                self.hit(r, n, "markup", "HTML entity (renders differently from its source)", line)
+            if FULLWIDTH.search(line):
+                self.hit(r, n, "unicode", "fullwidth characters (look-alike text)", line)
+            for word in re.findall(r"[^\W\d_]+", line):
+                if LATIN.search(word) and CONFUSABLE_SCRIPT.search(word):
+                    self.hit(r, n, "unicode", f"word mixes Latin with Greek/Cyrillic letters: {word!r}", line)
+                    break
             for u in URL.finditer(line):
                 inline = line[: u.start()].count("`") % 2 == 1
                 self.check_url(r, n, u.group(0), line, in_code or inline)

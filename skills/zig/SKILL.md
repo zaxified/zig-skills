@@ -653,7 +653,7 @@ var server = std.http.Server.init(
     &conn_writer.interface,
 );
 ```
-**Note:** HTTP client API is still rapidly evolving. For stability-critical code, consider shelling out to `curl`.
+**Note:** the HTTP client API still changes between Zig releases. For stability-critical code, pin the Zig version (`minimum_zig_version` in `build.zig.zon`) and wrap the client behind your own small interface.
 
 ## Quick Fixes
 
