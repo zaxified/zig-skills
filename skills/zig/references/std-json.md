@@ -126,7 +126,7 @@ defer allocator.free(json);
 
 // To writer
 var buf: [4096]u8 = undefined;
-var writer = std.fs.File.stdout().writer(&buf);
+var writer = std.Io.File.stdout().writer(io, &buf);
 try std.json.Stringify.value(config, .{}, &writer.interface);
 try writer.interface.flush();
 ```
@@ -281,7 +281,7 @@ const Point = struct {
 Build JSON incrementally:
 
 ```zig
-var out: std.io.Writer.Allocating = .init(allocator);
+var out: std.Io.Writer.Allocating = .init(allocator);
 defer out.deinit();
 
 var jw: std.json.Stringify = .{
@@ -344,7 +344,7 @@ const Config = struct {
 };
 
 fn loadConfig(allocator: std.mem.Allocator, path: []const u8) !Config {
-    const file = std.fs.cwd().openFile(path, .{}) catch |err| switch (err) {
+    const file = std.Io.Dir.cwd().openFile(path, .{}) catch |err| switch (err) {
         error.FileNotFound => return Config{},  // defaults
         else => return err,
     };

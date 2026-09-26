@@ -75,7 +75,7 @@ while (try it.next()) |file| {
         var buf: [1024]u8 = undefined;
         var output_file = try dir.createFile(file.name, .{});
         defer output_file.close();
-        var file_writer = output_file.writer(&buf);
+        var file_writer = output_file.writer(io, &buf);
         try it.streamRemaining(file, &file_writer.interface);
         try file_writer.interface.flush();
 
@@ -108,7 +108,7 @@ Extract entire archive to a directory:
 const data = @embedFile("archive.tar");
 var reader: std.Io.Reader = .fixed(data);
 
-try std.tar.pipeToFileSystem(std.fs.cwd(), &reader, .{
+try std.tar.pipeToFileSystem(std.Io.Dir.cwd(), &reader, .{
     .strip_components = 1,        // remove leading path component
     .mode_mode = .executable_bit_only,
     .exclude_empty_directories = false,
@@ -118,11 +118,11 @@ try std.tar.pipeToFileSystem(std.fs.cwd(), &reader, .{
 ### From File
 
 ```zig
-const file = try std.fs.cwd().openFile("archive.tar", .{});
+const file = try std.Io.Dir.cwd().openFile("archive.tar", .{});
 defer file.close();
 
 var buf: [4096]u8 = undefined;
-var file_reader = file.reader(&buf);
+var file_reader = file.reader(io, &buf);
 
 try std.tar.pipeToFileSystem(output_dir, &file_reader.interface, .{});
 ```
@@ -179,18 +179,18 @@ const tar_bytes = output.written();
 ### Writing from File
 
 ```zig
-var output_file = try std.fs.cwd().createFile("archive.tar", .{});
+var output_file = try std.Io.Dir.cwd().createFile("archive.tar", .{});
 defer output_file.close();
 var buf: [4096]u8 = undefined;
-var file_writer = output_file.writer(&buf);
+var file_writer = output_file.writer(io, &buf);
 
 var w: std.tar.Writer = .{ .underlying_writer = &file_writer.interface };
 
 // Write file from disk
-var src_file = try std.fs.cwd().openFile("data.txt", .{});
+var src_file = try std.Io.Dir.cwd().openFile("data.txt", .{});
 defer src_file.close();
 var src_buf: [4096]u8 = undefined;
-var src_reader = src_file.reader(&src_buf);
+var src_reader = src_file.reader(io, &src_buf);
 const stat = try src_file.stat();
 
 try w.writeFile("data.txt", &src_reader, stat.mtime);
@@ -222,7 +222,7 @@ pub fn writeFileBytes(w: *Writer, sub_path: []const u8, content: []const u8, opt
 pub fn writeFileStream(w: *Writer, sub_path: []const u8, size: u64, reader: *std.Io.Reader, options: Options) WriteFileStreamError!void
 
 // Write file from file reader
-pub fn writeFile(w: *Writer, sub_path: []const u8, file_reader: *std.fs.File.Reader, stat_mtime: i128) WriteFileError!void
+pub fn writeFile(w: *Writer, sub_path: []const u8, file_reader: *std.Io.File.Reader, stat_mtime: i128) WriteFileError!void
 
 // Write symbolic link
 pub fn writeLink(w: *Writer, sub_path: []const u8, link_name: []const u8, options: Options) Error!void
@@ -307,7 +307,7 @@ pub const Error = union(enum) {
 ### Extract and Process Archive
 
 ```zig
-fn extractTar(allocator: Allocator, tar_data: []const u8, dest: std.fs.Dir) !void {
+fn extractTar(allocator: Allocator, tar_data: []const u8, dest: std.Io.Dir) !void {
     var reader: std.Io.Reader = .fixed(tar_data);
 
     var diagnostics: std.tar.Diagnostics = .{ .allocator = allocator };
@@ -361,7 +361,7 @@ fn listTar(allocator: Allocator, tar_data: []const u8) !void {
 ### Create Archive from Directory
 
 ```zig
-fn createTarFromDir(allocator: Allocator, source_dir: std.fs.Dir, root_name: []const u8) ![]u8 {
+fn createTarFromDir(allocator: Allocator, source_dir: std.Io.Dir, root_name: []const u8) ![]u8 {
     var output: std.Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
 
@@ -378,7 +378,7 @@ fn createTarFromDir(allocator: Allocator, source_dir: std.fs.Dir, root_name: []c
                 var file = try entry.dir.openFile(entry.basename, .{});
                 defer file.close();
                 var buf: [4096]u8 = undefined;
-                var file_reader = file.reader(&buf);
+                var file_reader = file.reader(io, &buf);
                 const stat = try file.stat();
                 try w.writeFile(entry.path, &file_reader, stat.mtime);
             },

@@ -160,45 +160,49 @@ pub const Options = struct {
 
 ## LZMA
 
-LZMA decompression with streaming reader interface.
+**0.16 rewrite:** `lzma.decompress`/`decompressWithOptions` (free functions returning a generic-reader-shaped decompressor) are gone. `std.compress.lzma.Decompress` is now a concrete struct you construct with `initParams`/`initOptions`, taking a `*std.Io.Reader` input and giving you a `.reader: std.Io.Reader` field directly — there is no `std.io.GenericReader` wrapper anymore.
 
 ### Decompression
 
 ```zig
 const lzma = std.compress.lzma;
 
-var decompress = try lzma.decompress(allocator, reader);
+var out_buffer: [4096]u8 = undefined;
+var decompress = try lzma.Decompress.initOptions(input_reader, allocator, &out_buffer, .{}, 128 * 1024 * 1024);
 defer decompress.deinit();
 
-var buf: [4096]u8 = undefined;
+const r = &decompress.reader;
 while (true) {
-    const n = try decompress.read(&buf);
-    if (n == 0) break;
-    // Process buf[0..n]
+    const chunk = r.take(4096) catch |err| switch (err) {
+        error.EndOfStream => break,
+        else => return err,
+    };
+    if (chunk.len == 0) break;
+    // Process chunk
 }
 ```
 
 ### With Options
 
 ```zig
-var decompress = try lzma.decompressWithOptions(allocator, reader, .{
-    .memlimit = 128 * 1024 * 1024,  // 128 MB memory limit
-});
+var decompress = try lzma.Decompress.initOptions(input_reader, allocator, &out_buffer, .{
+    .mem_limit = 128 * 1024 * 1024,  // 128 MB memory limit
+}, 128 * 1024 * 1024);
 ```
 
-### Decompress Type
+### Decompress Type (actual 0.16 shape)
 
 ```zig
-pub fn Decompress(comptime ReaderType: type) type {
-    return struct {
-        pub const Reader = std.io.GenericReader(*Self, Error, read);
+pub const Decompress = struct {
+    gpa: Allocator,
+    input: *Reader,
+    reader: Reader,  // std.Io.Reader — read from this directly
+    // ... internal decode state ...
 
-        pub fn init(allocator: Allocator, source: ReaderType, params: Params, memlimit: ?usize) !Self;
-        pub fn deinit(self: *Self) void;
-        pub fn reader(self: *Self) Reader;
-        pub fn read(self: *Self, output: []u8) Error!usize;
-    };
-}
+    pub fn initParams(input: *Reader, gpa: Allocator, buffer: []u8, params: Decode.Params, mem_limit: usize) !Decompress;
+    pub fn initOptions(input: *Reader, gpa: Allocator, buffer: []u8, options: Decode.Options, mem_limit: usize) !Decompress;
+    pub fn deinit(d: *Decompress) void;
+};
 ```
 
 ## LZMA2
@@ -210,11 +214,16 @@ LZMA2 decompression (improved LZMA with better streaming support).
 ```zig
 const lzma2 = std.compress.lzma2;
 
-var output = std.ArrayList(u8).empty;
-defer output.deinit(allocator);
+// 0.16: no std.io.fixedBufferStream — use std.Io.Reader.fixed() for an in-memory reader,
+// and lzma2.Decode (not a free `decompress` function) driving a Writer.Allocating output.
+var input_reader: std.Io.Reader = .fixed(compressed_data);
+var output: std.Io.Writer.Allocating = .init(allocator);
+defer output.deinit();
 
-var stream = std.io.fixedBufferStream(compressed_data);
-try lzma2.decompress(allocator, stream.reader(), output.writer(allocator));
+var decode = try lzma2.Decode.init(allocator);
+defer decode.deinit(allocator);
+_ = try decode.decompress(&input_reader, &output);
+// output.written() holds the decompressed bytes
 ```
 
 ## XZ
@@ -223,17 +232,23 @@ XZ format decompression (LZMA2 in a container with checksums).
 
 ### Decompression
 
+**0.16:** same shape change as LZMA — `xz.decompress` (free function) is gone; `std.compress.xz.Decompress.init(input, gpa, buffer)` gives you a `.reader: std.Io.Reader` field to read from directly:
+
 ```zig
 const xz = std.compress.xz;
 
-var decompress = try xz.decompress(allocator, reader);
+var out_buffer: [4096]u8 = undefined;
+var decompress = try xz.Decompress.init(input_reader, allocator, &out_buffer);
 defer decompress.deinit();
 
-var buf: [4096]u8 = undefined;
+const r = &decompress.reader;
 while (true) {
-    const n = try decompress.read(&buf);
-    if (n == 0) break;
-    // Process buf[0..n]
+    const chunk = r.take(4096) catch |err| switch (err) {
+        error.EndOfStream => break,
+        else => return err,
+    };
+    if (chunk.len == 0) break;
+    // Process chunk
 }
 ```
 
@@ -314,17 +329,17 @@ fn decompressToFile(
 ) !void {
     const flate = std.compress.flate;
 
-    const input_file = try std.fs.cwd().openFile(input_path, .{});
+    const input_file = try std.Io.Dir.cwd().openFile(input_path, .{});
     defer input_file.close();
 
-    const output_file = try std.fs.cwd().createFile(output_path, .{});
+    const output_file = try std.Io.Dir.cwd().createFile(output_path, .{});
     defer output_file.close();
 
     var input_buf: [4096]u8 = undefined;
-    var input_reader = input_file.reader(&input_buf);
+    var input_reader = input_file.reader(io, &input_buf);
 
     var output_buf: [4096]u8 = undefined;
-    var output_writer = output_file.writer(&output_buf);
+    var output_writer = output_file.writer(io, &output_buf);
 
     var decompress: flate.Decompress = .init(&input_reader.interface, container, &.{});
     _ = try decompress.reader.streamRemaining(&output_writer.interface);

@@ -117,7 +117,7 @@ const Point = struct {
     x: f32,
     y: f32,
 
-    pub fn format(self: @This(), writer: *std.io.Writer) std.io.Writer.Error!void {
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.print("({d:.2}, {d:.2})", .{ self.x, self.y });
     }
 };
@@ -169,51 +169,44 @@ Panic prints message + stack trace to stderr, then aborts.
 
 ## Stack Traces
 
+**0.16 rewrite:** the whole stack-unwinding API changed shape. `dumpCurrentStackTrace` now takes a `StackUnwindOptions` struct instead of a bare `?usize`; `captureStackTrace`/`dumpCurrentStackTraceToWriter` are gone in favor of `captureCurrentStackTrace`/`writeCurrentStackTrace`; `StackIterator` is now a private implementation detail (no public `.init`).
+
 ### Dump Current Stack
 
 ```zig
 // Print current stack trace to stderr
-std.debug.dumpCurrentStackTrace(null);
+std.debug.dumpCurrentStackTrace(.{});
 
 // Skip frames until this address
-std.debug.dumpCurrentStackTrace(@returnAddress());
+std.debug.dumpCurrentStackTrace(.{ .first_address = @returnAddress() });
 ```
 
-### Dump to Writer
+### Write to a Writer
+
+`dumpCurrentStackTraceToWriter` is gone — use `writeCurrentStackTrace`, which takes an `Io.Terminal` (writer + color mode), not a bare writer:
 
 ```zig
 var buf: [4096]u8 = undefined;
-const stderr = std.fs.File.stderr().writer(&buf);
-try std.debug.dumpCurrentStackTraceToWriter(null, &stderr.interface);
+var stderr_writer = std.Io.File.stderr().writer(io, &buf);
+const terminal: std.Io.Terminal = .{ .writer = &stderr_writer.interface, .mode = .no_color };
+try std.debug.writeCurrentStackTrace(.{}, terminal);
 ```
 
 ### Capture Stack Trace
 
+`captureStackTrace(ret_addr, *trace)` is gone — `captureCurrentStackTrace` now returns the `StackTrace` itself instead of writing into one you pass in:
+
 ```zig
 var addrs: [32]usize = undefined;
-var trace: std.builtin.StackTrace = .{
-    .instruction_addresses = &addrs,
-    .index = 0,
-};
-std.debug.captureStackTrace(@returnAddress(), &trace);
+const trace = std.debug.captureCurrentStackTrace(.{ .first_address = @returnAddress() }, &addrs);
 
 // Later: print captured trace
-std.debug.dumpStackTrace(trace);
+std.debug.dumpStackTrace(&trace);
 ```
 
 ### StackIterator
 
-Walk the stack manually:
-
-```zig
-var it = std.debug.StackIterator.init(@returnAddress(), null);
-defer it.deinit();
-
-while (it.next()) |return_address| {
-    const addr = return_address -| 1;
-    std.debug.print("0x{x}\n", .{addr});
-}
-```
+**Removed as public API in 0.16:** `std.debug.StackIterator` is now a private implementation detail of `debug.zig`. Manual stack walking is no longer supported directly — use `captureCurrentStackTrace`/`writeCurrentStackTrace` with `StackUnwindOptions.context` (a `*const cpu_context.Native`) if you need to unwind from a captured register state (e.g. inside a signal handler) instead of the current top of stack.
 
 ## Hex Dump
 
@@ -225,11 +218,11 @@ std.debug.dumpHex(data);
 // Output:
 // 7fff5fbff8a0  48 65 6C 6C 6F 2C 20 57  6F 72 6C 64 21 00 01 02  Hello, World!...
 
-// Dump to writer
-var buf: [256]u8 = undefined;
-var aw: std.io.Writer.Allocating = .init(allocator);
+// Dump to writer — dumpHexFallible(t: Io.Terminal, bytes), not (writer, mode, bytes)
+var aw: std.Io.Writer.Allocating = .init(allocator);
 defer aw.deinit();
-try std.debug.dumpHexFallible(&aw.writer, .no_color, data);
+const terminal: std.Io.Terminal = .{ .writer = &aw.writer, .mode = .no_color };
+try std.debug.dumpHexFallible(terminal, data);
 ```
 
 Output format:
@@ -342,8 +335,15 @@ if (std.debug.have_segfault_handling_support) {
     // Attach handler (prints stack trace on SIGSEGV/SIGBUS/etc)
     std.debug.attachSegfaultHandler();
 
-    // Later: reset to default handler
-    std.debug.resetSegfaultHandler();
+    // Later: reset to default handler.
+    // 0.16: resetSegfaultHandler() is private; build the same POSIX reset yourself via the
+    // still-public updateSegfaultHandler (Windows needs RtlRemoveVectoredExceptionHandler instead).
+    const act = std.posix.Sigaction{
+        .handler = .{ .handler = std.posix.SIG.DFL },
+        .mask = std.posix.sigemptyset(),
+        .flags = 0,
+    };
+    std.debug.updateSegfaultHandler(&act);
 }
 
 // Check if handler is enabled by default
@@ -354,21 +354,16 @@ const enabled = std.debug.default_enable_segfault_handler;
 
 ## Thread Context
 
-Platform-specific CPU register state for stack unwinding:
+**Removed in 0.16:** `std.debug.ThreadContext`, `getContext`, `copyContext`, and `dumpStackTraceFromBase` are gone (the old ucontext-based capture/copy scheme). Register-state capture is now `std.debug.cpu_context.Native` (a `CpuContextPtr` points to one), used only for feeding a previously-captured state into `StackUnwindOptions.context` — e.g. from a signal handler, which the kernel already hands a `*const cpu_context.Native` for:
 
 ```zig
-const ThreadContext = std.debug.ThreadContext;
-
-var ctx: ThreadContext = undefined;
-if (std.debug.getContext(&ctx)) {
-    // ctx now contains register state
-    std.debug.dumpStackTraceFromBase(&ctx, stderr);
+// Inside a signal handler that receives the OS's ucontext/mcontext as `ctx: *const std.debug.cpu_context.Native`:
+fn handler(ctx: *const std.debug.cpu_context.Native) void {
+    std.debug.dumpCurrentStackTrace(.{ .context = ctx });
 }
-
-// Copy context (handles internal pointers)
-var ctx_copy: ThreadContext = undefined;
-std.debug.copyContext(&original_ctx, &ctx_copy);
 ```
+
+There is no public API anymore for capturing *your own* running thread's context outside of the normal `dumpCurrentStackTrace`/`captureCurrentStackTrace` entry points.
 
 ## Valgrind Detection
 
@@ -404,10 +399,9 @@ std.debug.runtime_safety  // true in Debug/ReleaseSafe
 
 // Whether platform can produce stack traces
 std.debug.sys_can_stack_trace  // false on WASM, MIPS, etc.
-
-// Whether platform has ucontext_t
-std.debug.have_ucontext
 ```
+
+**Removed in 0.16:** `std.debug.have_ucontext` — the ucontext-based context capture it described no longer exists as public API (see Thread Context above).
 
 ## Submodules
 
@@ -428,7 +422,8 @@ pub const panic = std.debug.FullPanic(myPanicFn);
 
 fn myPanicFn(msg: []const u8, ret_addr: ?usize) noreturn {
     // Custom panic handling (log to file, send telemetry, etc.)
-    std.posix.abort();
+    // 0.16: std.posix.abort() doesn't exist — use std.process.abort() (or std.c.abort() if linking libc)
+    std.process.abort();
 }
 
 // Now safety checks use myPanicFn with descriptive messages:
@@ -444,13 +439,16 @@ For multi-line debug output without interleaving:
 
 ```zig
 // Lock stderr and clear any progress indicators
-std.debug.lockStdErr();
-defer std.debug.unlockStdErr();
+// 0.16: lockStdErr/unlockStdErr (capital "Err") never existed — it's lockStderr/unlockStderr,
+// and it needs a buffer (see the writer-based form below); std.io.getStdErr() is also gone.
+var buf: [256]u8 = undefined;
+const held = std.debug.lockStderr(&buf);
+defer std.debug.unlockStderr();
 
 // Safe to write multiple lines
-const stderr = std.io.getStdErr();
-try stderr.writeAll("Line 1\n");
-try stderr.writeAll("Line 2\n");
+try held.file_writer.interface.writeAll("Line 1\n");
+try held.file_writer.interface.writeAll("Line 2\n");
+try held.file_writer.interface.flush();
 ```
 
 Or with a writer:

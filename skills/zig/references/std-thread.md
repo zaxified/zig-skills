@@ -1,12 +1,25 @@
-# std.Thread - Threading and Concurrency API Reference (0.15.x → 0.16)
+# std.Thread - Threading and Concurrency API Reference (0.16)
 
-Thread spawning, synchronization primitives, and concurrent programming in Zig 0.15.x.
+Thread spawning and synchronization in Zig 0.16.
 
-## Critical: Mutex, Condition, sleep Removed (0.16)
+## Critical: Sync Primitives Removed From std.Thread (0.16)
 
-In Zig 0.16, `std.Thread.Mutex`, `std.Thread.Condition`, and `std.Thread.sleep` are **removed**. The 0.16 replacements (`std.Io.Mutex` / `std.Io.Condition`) require an `Io` instance, which is not always available (e.g. in libraries/vendored deps).
+`std.Thread.Mutex`, `std.Thread.Mutex.Recursive`, `std.Thread.Condition`, `std.Thread.RwLock`, `std.Thread.Semaphore`, `std.Thread.Futex`, `std.Thread.Pool`, `std.Thread.WaitGroup`, `std.Thread.ResetEvent`, and `std.Thread.sleep` are **all removed** from `std.Thread`. Only `std.Thread.spawn` and the thread-identity/utility functions (`getCurrentId`, `getCpuCount`, `yield`, `setName`/`getName`) remain there, unchanged.
 
-**POSIX shims (portable fallback):**
+Where things moved:
+
+| 0.15.x | 0.16 |
+|--------|------|
+| `std.Thread.Mutex` | `std.Io.Mutex` (needs `io: Io` on every call) |
+| `std.Thread.Condition` | `std.Io.Condition` (needs `io`) |
+| `std.Thread.RwLock` | `std.Io.RwLock` (needs `io`) |
+| `std.Thread.Semaphore` | `std.Io.Semaphore` (needs `io`) |
+| `std.Thread.Futex` | `io.futexWait`/`io.futexWake` methods on `Io` (needs `io`); or the raw `std.os.linux.futex` syscall if you have no `Io` |
+| `std.Thread.ResetEvent` | `std.Io.Event` (needs `io`) |
+| `std.Thread.WaitGroup` + `std.Thread.Pool` | `std.Io.Group` (`group.async(io, fn, args)` / `group.await(io)`), backed by an `Io.Threaded` instance instead of a separately-managed pool |
+| `std.Thread.sleep` | `io.sleep(duration, clock)`, or raw `std.c.nanosleep` with no `Io` |
+
+**POSIX shims (last resort — code with no `Io` that already links libc):**
 
 ```zig
 const PthreadMutex = struct {
@@ -36,6 +49,7 @@ const PthreadCondition = struct {
     }
 };
 
+// nanosleep with no Io, already linking libc (no Io.sleep available)
 fn threadSleep(ns: u64) void {
     const ts = std.c.timespec{
         .sec = @intCast(ns / std.time.ns_per_s),
@@ -45,7 +59,7 @@ fn threadSleep(ns: u64) void {
 }
 ```
 
-**Still present in 0.16:** `std.Thread.spawn`, `std.Thread.Pool`, `std.Thread.WaitGroup`, `std.Thread.ResetEvent`, `std.Thread.Semaphore`, `std.Thread.RwLock`, `std.Thread.Futex`.
+For library code with no `Io` and no libc, a Linux-only fallback is the raw futex syscall, `std.os.linux.futex(...)`, which still exists (see `std.os` reference).
 
 ## Table of Contents
 - [Module Structure](#module-structure)
@@ -56,27 +70,21 @@ fn threadSleep(ns: u64) void {
   - [RwLock](#rwlock)
   - [Condition](#condition)
   - [Semaphore](#semaphore)
-  - [ResetEvent](#resetevent)
-  - [WaitGroup](#waitgroup)
-- [Thread Pool](#thread-pool)
+  - [Event (was ResetEvent)](#event-was-resetevent)
+  - [Group (was WaitGroup / Pool)](#group-was-waitgroup--pool)
 - [Common Patterns](#common-patterns)
 
 ## Module Structure
 
 ```zig
-std.Thread                  // Thread spawning and management
-std.Thread.Mutex            // Mutual exclusion lock
-std.Thread.Mutex.Recursive  // Recursive mutex (same thread can lock multiple times)
-std.Thread.RwLock           // Reader-writer lock
-std.Thread.Condition        // Condition variable for signaling
-std.Thread.Semaphore        // Counting semaphore
-std.Thread.ResetEvent       // Boolean event flag with blocking
-std.Thread.WaitGroup        // Wait for multiple tasks to complete
-std.Thread.Pool             // Thread pool for parallel task execution
-std.Thread.Futex            // Low-level futex operations (advanced)
+std.Thread                  // Thread spawning and management — unchanged in 0.16
+std.Io.Mutex                 // Mutual exclusion lock (needs io)
+std.Io.RwLock                // Reader-writer lock (needs io)
+std.Io.Condition             // Condition variable for signaling (needs io)
+std.Io.Semaphore             // Counting semaphore (needs io)
+std.Io.Event                 // Boolean event flag with blocking wait (needs io) — was Thread.ResetEvent
+std.Io.Group                 // Spawn + await a set of tasks (needs io) — was Thread.WaitGroup / Thread.Pool
 ```
-
-> **0.16 Note:** `std.Thread.Mutex`, `std.Thread.Mutex.Recursive`, and `std.Thread.Condition` are removed in Zig 0.16. Use `std.Io.Mutex` / `std.Io.Condition` (requires an `Io` instance) or the POSIX pthread shims shown in the migration section above.
 
 ## Spawning Threads
 
@@ -149,11 +157,11 @@ std.debug.print("CPUs: {d}\n", .{cpu_count});
 
 ### Sleep
 
-**Note (0.16):** `std.Thread.sleep` is removed. Use `nanosleep` via `std.c.nanosleep` (see migration section above).
+**Note (0.16):** `std.Thread.sleep` is removed. With an `Io` instance, use `io.sleep(duration, clock)`; without one, `nanosleep` via `std.c.nanosleep` (see migration section above).
 
 ```zig
-threadSleep(100 * std.time.ns_per_ms);  // sleep 100ms (threadSleep helper from migration section above)
-threadSleep(std.time.ns_per_s);          // sleep 1 second
+try io.sleep(.fromMilliseconds(100), .awake);  // sleep 100ms
+try io.sleep(.fromSeconds(1), .awake);          // sleep 1 second
 ```
 
 ### Yield
@@ -167,8 +175,8 @@ std.Thread.yield() catch {};  // hint to scheduler
 ```zig
 var thread = try std.Thread.spawn(.{}, worker, .{});
 
-// Set thread name (max length varies by OS)
-try thread.setName("worker-1");
+// Set thread name (max length varies by OS) — needs an `io: Io` in 0.16
+try thread.setName(io, "worker-1");
 
 // Get thread name
 var name_buf: [std.Thread.max_name_len:0]u8 = undefined;
@@ -181,169 +189,127 @@ if (try thread.getName(&name_buf)) |name| {
 
 ### Mutex
 
-**Note (0.16):** `std.Thread.Mutex` is removed in Zig 0.16. Use `PthreadMutex` shim (see migration section above) or `std.Io.Mutex` if you have an `Io` instance.
+**Note (0.16):** `std.Thread.Mutex` is removed. Use `std.Io.Mutex`, which needs an `io: Io` on `lock`/`unlock`. There is no `Mutex.Recursive` anymore — restructure to avoid recursive locking, or track ownership manually.
 
 Basic mutual exclusion lock. Use `defer` for exception-safe unlocking.
 
 ```zig
-var mutex: std.Thread.Mutex = .{};
+var mutex: std.Io.Mutex = .init;
 var shared_data: u64 = 0;
 
-fn increment() void {
-    mutex.lock();
-    defer mutex.unlock();
+fn increment(io: std.Io) !void {
+    try mutex.lock(io);
+    defer mutex.unlock(io);
     shared_data += 1;
 }
 
-// tryLock for non-blocking acquisition
+// tryLock for non-blocking acquisition (no `io` needed — never blocks)
 if (mutex.tryLock()) {
-    defer mutex.unlock();
+    defer mutex.unlock(io);
     // critical section
 } else {
     // lock not acquired
 }
 ```
 
-**Debug mode**: Detects deadlocks when same thread tries to lock twice.
-
-#### Recursive Mutex
-
-Allows same thread to lock multiple times (must unlock same number of times).
-
-```zig
-var rmutex: std.Thread.Mutex.Recursive = .{};
-
-fn outer() void {
-    rmutex.lock();
-    defer rmutex.unlock();
-    inner();  // can lock again
-}
-
-fn inner() void {
-    rmutex.lock();
-    defer rmutex.unlock();
-    // ...
-}
-```
-
 ### RwLock
 
-Reader-writer lock: multiple readers OR one writer.
+Reader-writer lock: multiple readers OR one writer. Moved to `std.Io.RwLock` — same shape, every method now takes `io: Io` (except the non-blocking `tryLock*` variants).
 
 ```zig
-var rwlock: std.Thread.RwLock = .{};
+var rwlock: std.Io.RwLock = .init;
 var data: []const u8 = "initial";
 
-fn reader() void {
-    rwlock.lockShared();
-    defer rwlock.unlockShared();
+fn reader(io: std.Io) !void {
+    try rwlock.lockShared(io);
+    defer rwlock.unlockShared(io);
     // read data safely (multiple readers allowed)
     _ = data;
 }
 
-fn writer(new_data: []const u8) void {
-    rwlock.lock();
-    defer rwlock.unlock();
+fn writer(io: std.Io, new_data: []const u8) !void {
+    try rwlock.lock(io);
+    defer rwlock.unlock(io);
     // exclusive write access
     data = new_data;
 }
 
-// Non-blocking variants
+// Non-blocking variants (no `io` needed)
 if (rwlock.tryLockShared()) {
-    defer rwlock.unlockShared();
+    defer rwlock.unlockShared(io);
     // read
 }
 
 if (rwlock.tryLock()) {
-    defer rwlock.unlock();
+    defer rwlock.unlock(io);
     // write
 }
 ```
 
 ### Condition
 
-**Note (0.16):** `std.Thread.Condition` is removed in Zig 0.16. Use `PthreadCondition` shim (see migration section above) or `std.Io.Condition` if you have an `Io` instance.
+**Note (0.16):** `std.Thread.Condition` is removed. Use `std.Io.Condition`, which needs `io: Io`. There is no built-in `timedWait` — a bounded wait needs a separate timeout mechanism layered on top of `wait` (e.g. racing against `io.sleep` via `Io.Group`), not shown here.
 
 Wait for a condition to become true. Always use with a Mutex.
 
 ```zig
-var mutex: std.Thread.Mutex = .{};
-var cond: std.Thread.Condition = .{};
+var mutex: std.Io.Mutex = .init;
+var cond: std.Io.Condition = .init;
 var ready = false;
 
-fn consumer() void {
-    mutex.lock();
-    defer mutex.unlock();
+fn consumer(io: std.Io) !void {
+    try mutex.lock(io);
+    defer mutex.unlock(io);
 
     // Wait in a loop (handles spurious wakeups)
     while (!ready) {
-        cond.wait(&mutex);  // atomically unlocks, waits, relocks
+        try cond.wait(io, &mutex);  // atomically unlocks, waits, relocks
     }
     // Process data
 }
 
-fn producer() void {
+fn producer(io: std.Io) !void {
     {
-        mutex.lock();
-        defer mutex.unlock();
+        try mutex.lock(io);
+        defer mutex.unlock(io);
         ready = true;
     }
-    cond.signal();     // wake one waiter
-    // cond.broadcast(); // wake all waiters
-}
-```
-
-#### Timed Wait
-
-```zig
-fn timedConsumer() !void {
-    mutex.lock();
-    defer mutex.unlock();
-
-    while (!ready) {
-        cond.timedWait(&mutex, 5 * std.time.ns_per_s) catch |err| switch (err) {
-            error.Timeout => return error.TimedOut,
-        };
-    }
+    cond.signal(io);     // wake one waiter
+    // cond.broadcast(io); // wake all waiters
 }
 ```
 
 ### Semaphore
 
-Counting semaphore for resource limiting.
+Counting semaphore for resource limiting. Moved to `std.Io.Semaphore`; `wait`/`post` take `io: Io`. There is no built-in `timedWait`.
 
 ```zig
-var sem: std.Thread.Semaphore = .{ .permits = 3 };  // 3 permits available
+var sem: std.Io.Semaphore = .{ .permits = 3 };  // 3 permits available
 
-fn worker() void {
-    sem.wait();     // acquire permit (blocks if 0)
-    defer sem.post();  // release permit
+fn worker(io: std.Io) !void {
+    try sem.wait(io);     // acquire permit (blocks if 0)
+    defer sem.post(io);  // release permit
     // use limited resource
 }
-
-// Timed wait
-sem.timedWait(1 * std.time.ns_per_s) catch |err| switch (err) {
-    error.Timeout => { /* handle timeout */ },
-};
 ```
 
-### ResetEvent
+### Event (was ResetEvent)
 
-Boolean flag with blocking wait. Useful for one-shot signaling.
+Boolean flag with blocking wait. Useful for one-shot signaling. `std.Thread.ResetEvent` is gone; the replacement is `std.Io.Event`, whose methods take `io: Io` (except `isSet`/`reset`, which never block).
 
 ```zig
-var event: std.Thread.ResetEvent = .{};
+var event: std.Io.Event = .unset;
 
-fn waiter() void {
-    event.wait();  // blocks until set
+fn waiter(io: std.Io) !void {
+    try event.wait(io);  // blocks until set
     // event.isSet() returns true
 }
 
-fn signaler() void {
-    event.set();   // unblocks all waiters
+fn signaler(io: std.Io) void {
+    event.set(io);   // unblocks all waiters
 }
 
-// Reset for reuse
+// Reset for reuse (only valid with no pending wait)
 event.reset();
 
 // Check without blocking
@@ -351,128 +317,34 @@ if (event.isSet()) {
     // already signaled
 }
 
-// Timed wait
-event.timedWait(1 * std.time.ns_per_s) catch |err| switch (err) {
+// Timed wait — Io.Timeout.duration takes a Clock.Duration (raw duration + which clock)
+event.waitTimeout(io, .{ .duration = .{ .raw = .fromSeconds(1), .clock = .awake } }) catch |err| switch (err) {
     error.Timeout => { /* handle timeout */ },
+    error.Canceled => return err,
 };
 ```
 
-### WaitGroup
+### Group (was WaitGroup / Pool)
 
-Wait for multiple concurrent tasks to complete.
+`std.Thread.WaitGroup` and `std.Thread.Pool` are both gone. `std.Io.Group` replaces both: it spawns tasks through the `Io` implementation's own thread pool (e.g. `std.Io.Threaded`) and lets you wait for all of them.
 
 ```zig
-var wg: std.Thread.WaitGroup = .{};
+var group: std.Io.Group = .init;
 
-fn spawnTasks() void {
-    for (0..10) |i| {
-        wg.start();  // increment counter before spawning
-        _ = std.Thread.spawn(.{}, task, .{ &wg, i }) catch {
-            wg.finish();  // decrement if spawn fails
-            continue;
-        };
-    }
-}
-
-fn task(wait_group: *std.Thread.WaitGroup, id: usize) void {
-    defer wait_group.finish();  // always decrement when done
+fn task(id: usize) void {
     // do work
     _ = id;
 }
 
-pub fn main() !void {
-    spawnTasks();
-    wg.wait();  // blocks until all tasks finish
+pub fn spawnTasks(io: std.Io) !void {
+    for (0..10) |i| {
+        group.async(io, task, .{i});  // spawns on the Io's own pool
+    }
+    try group.await(io);  // blocks until all tasks finish (or a cancelation propagates)
 }
 ```
 
-#### Batch Operations
-
-```zig
-wg.startMany(10);  // increment by 10
-
-// Check if done without blocking
-if (wg.isDone()) {
-    // all tasks completed
-}
-
-// Reset for reuse
-wg.reset();
-```
-
-#### Spawn Manager Pattern
-
-```zig
-var wg: std.Thread.WaitGroup = .{};
-
-// Spawns a detached thread that decrements wg on completion
-wg.spawnManager(someFunc, .{arg1, arg2});
-
-wg.wait();  // wait for manager and all its work
-```
-
-## Thread Pool
-
-Reusable pool of worker threads for parallel task execution.
-
-### Basic Usage
-
-```zig
-var pool: std.Thread.Pool = undefined;
-try pool.init(.{
-    .allocator = allocator,
-    .n_jobs = null,  // default: CPU count
-});
-defer pool.deinit();
-
-var wg: std.Thread.WaitGroup = .{};
-
-// Queue work
-for (items) |item| {
-    pool.spawnWg(&wg, processItem, .{item});
-}
-
-// Wait for all work to complete
-wg.wait();
-// Or: participate in work while waiting
-pool.waitAndWork(&wg);
-```
-
-### Pool Options
-
-```zig
-try pool.init(.{
-    .allocator = allocator,
-    .n_jobs = 4,              // number of worker threads (default: CPU count)
-    .track_ids = true,        // enable thread IDs for spawnWgId
-    .stack_size = 8 * 1024 * 1024,  // worker stack size
-});
-```
-
-### Spawn Variants
-
-```zig
-// Basic spawn (fire and forget, may fallback to sync)
-try pool.spawn(func, .{args});
-
-// With WaitGroup tracking
-pool.spawnWg(&wg, func, .{args});
-
-// With thread ID (requires track_ids = true)
-pool.spawnWgId(&wg, funcWithId, .{args});
-
-fn funcWithId(thread_id: usize, args: anytype) void {
-    // thread_id is dense 0..n_jobs
-    _ = thread_id;
-    _ = args;
-}
-```
-
-### Get Thread Count
-
-```zig
-const total_threads = pool.getIdCount();  // 1 + n_jobs (includes main)
-```
+`Group.concurrent(io, fn, args)` is the "must actually run concurrently, or fail" variant of `.async` (returns `error.ConcurrencyUnavailable` instead of silently running inline). There is no separate `n_jobs`/pool-size knob here — that's configured once, on the `Io.Threaded` instance itself (`InitOptions.async_limit`/`concurrent_limit`).
 
 ## Common Patterns
 
@@ -486,38 +358,38 @@ fn BoundedQueue(comptime T: type, comptime capacity: usize) type {
         tail: usize = 0,
         count: usize = 0,
 
-        mutex: std.Thread.Mutex = .{},
-        not_empty: std.Thread.Condition = .{},
-        not_full: std.Thread.Condition = .{},
+        mutex: std.Io.Mutex = .init,
+        not_empty: std.Io.Condition = .init,
+        not_full: std.Io.Condition = .init,
 
-        pub fn push(self: *@This(), item: T) void {
-            self.mutex.lock();
-            defer self.mutex.unlock();
+        pub fn push(self: *@This(), io: std.Io, item: T) !void {
+            try self.mutex.lock(io);
+            defer self.mutex.unlock(io);
 
             while (self.count == capacity) {
-                self.not_full.wait(&self.mutex);
+                try self.not_full.wait(io, &self.mutex);
             }
 
             self.buffer[self.tail] = item;
             self.tail = (self.tail + 1) % capacity;
             self.count += 1;
 
-            self.not_empty.signal();
+            self.not_empty.signal(io);
         }
 
-        pub fn pop(self: *@This()) T {
-            self.mutex.lock();
-            defer self.mutex.unlock();
+        pub fn pop(self: *@This(), io: std.Io) !T {
+            try self.mutex.lock(io);
+            defer self.mutex.unlock(io);
 
             while (self.count == 0) {
-                self.not_empty.wait(&self.mutex);
+                try self.not_empty.wait(io, &self.mutex);
             }
 
             const item = self.buffer[self.head];
             self.head = (self.head + 1) % capacity;
             self.count -= 1;
 
-            self.not_full.signal();
+            self.not_full.signal(io);
             return item;
         }
     };
@@ -528,7 +400,7 @@ fn BoundedQueue(comptime T: type, comptime capacity: usize) type {
 
 ```zig
 const Counter = struct {
-    value: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    value: std.atomic.Value(u64) = .init(0),
 
     pub fn increment(self: *@This()) void {
         _ = self.value.fetchAdd(1, .monotonic);
@@ -544,7 +416,7 @@ const Counter = struct {
 
 ```zig
 fn parallelMap(
-    pool: *std.Thread.Pool,
+    io: std.Io,
     allocator: std.mem.Allocator,
     comptime T: type,
     comptime U: type,
@@ -552,17 +424,17 @@ fn parallelMap(
     comptime mapFn: fn (T) U,
 ) ![]U {
     const results = try allocator.alloc(U, items.len);
-    var wg: std.Thread.WaitGroup = .{};
+    var group: std.Io.Group = .init;
 
     for (items, 0..) |item, i| {
-        pool.spawnWg(&wg, struct {
+        group.async(io, struct {
             fn work(r: []U, idx: usize, val: T) void {
                 r[idx] = mapFn(val);
             }
         }.work, .{ results, i, item });
     }
 
-    pool.waitAndWork(&wg);
+    try group.await(io);
     return results;
 }
 ```
@@ -571,17 +443,17 @@ fn parallelMap(
 
 ```zig
 var initialized = std.atomic.Value(bool).init(false);
-var init_mutex: std.Thread.Mutex = .{};
+var init_mutex: std.Io.Mutex = .init;
 var global_resource: ?*Resource = null;
 
-fn getResource() *Resource {
+fn getResource(io: std.Io) !*Resource {
     // Fast path: already initialized
     if (initialized.load(.acquire)) {
         return global_resource.?;
     }
 
-    init_mutex.lock();
-    defer init_mutex.unlock();
+    try init_mutex.lock(io);
+    defer init_mutex.unlock(io);
 
     // Double-check after acquiring lock
     if (!initialized.load(.acquire)) {
@@ -597,18 +469,18 @@ fn getResource() *Resource {
 
 ```zig
 const Barrier = struct {
-    event: std.Thread.ResetEvent = .{},
+    event: std.Io.Event = .unset,
     counter: std.atomic.Value(usize),
 
     pub fn init(count: usize) @This() {
         return .{ .counter = std.atomic.Value(usize).init(count) };
     }
 
-    pub fn wait(self: *@This()) void {
+    pub fn wait(self: *@This(), io: std.Io) !void {
         if (self.counter.fetchSub(1, .acq_rel) == 1) {
-            self.event.set();  // last thread signals all
+            self.event.set(io);  // last thread signals all
         } else {
-            self.event.wait();  // others wait
+            try self.event.wait(io);  // others wait
         }
     }
 };
@@ -617,14 +489,14 @@ const Barrier = struct {
 ### Scoped Lock Helper
 
 ```zig
-fn withLock(mutex: *std.Thread.Mutex, comptime func: anytype, args: anytype) @TypeOf(@call(.auto, func, args)) {
-    mutex.lock();
-    defer mutex.unlock();
+fn withLock(io: std.Io, mutex: *std.Io.Mutex, comptime func: anytype, args: anytype) !@TypeOf(@call(.auto, func, args)) {
+    try mutex.lock(io);
+    defer mutex.unlock(io);
     return @call(.auto, func, args);
 }
 
 // Usage
-const result = withLock(&mutex, computeValue, .{x, y});
+const result = try withLock(io, &mutex, computeValue, .{x, y});
 ```
 
 ### Thread-Local Storage

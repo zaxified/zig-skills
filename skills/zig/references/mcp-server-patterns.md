@@ -46,28 +46,28 @@ Key insight: MCP uses newline-delimited messages (no headers), LSP uses `Content
 
 ## MCP Transport (Newline-Delimited JSON-RPC)
 
+**0.16:** `std.Thread.Mutex` is removed — use `std.Io.Mutex` (needs `io: Io`; see [std.Thread reference](std-thread.md)). `std.Io.File` also has no bare `.read()`/`.writeAll()` anymore — go through the buffered `.reader(io, buf)`/`.writer(io, buf)` wrapper and its `.interface`:
+
 ```zig
 pub const McpTransport = struct {
-    stdin_file: std.fs.File,
-    stdout_file: std.fs.File,
-    stdout_mutex: std.Thread.Mutex = .{},
+    stdin_file: std.Io.File,
+    stdout_file: std.Io.File,
+    stdout_mutex: std.Io.Mutex = .init,
 
-    pub fn readMessage(self: *McpTransport, allocator: std.mem.Allocator) !?[]const u8 {
-        _ = self;
+    pub fn readMessage(self: *McpTransport, io: std.Io, allocator: std.mem.Allocator) !?[]const u8 {
         var line: std.ArrayList(u8) = .empty;
         errdefer line.deinit(allocator);
 
-        const stdin = std.fs.File.stdin();
+        var buf: [4096]u8 = undefined;
+        var reader = self.stdin_file.reader(io, &buf);
         while (true) {
-            var byte: [1]u8 = undefined;
-            const n = stdin.read(&byte) catch |err| switch (err) {
-                error.BrokenPipe => return null,
+            const byte = reader.interface.takeByte() catch |err| switch (err) {
+                error.EndOfStream => { if (line.items.len == 0) return null; break; },
                 else => return err,
             };
-            if (n == 0) { if (line.items.len == 0) return null; break; }
-            if (byte[0] == '\n') break;
-            if (byte[0] == '\r') continue;
-            try line.append(allocator, byte[0]);
+            if (byte == '\n') break;
+            if (byte == '\r') continue;
+            try line.append(allocator, byte);
             if (line.items.len > 1024 * 1024) return error.MessageTooLarge;
         }
         if (line.items.len == 0) return null;
@@ -75,18 +75,21 @@ pub const McpTransport = struct {
     }
 
     /// Thread-safe write with mutex (reader thread may trigger writes).
-    pub fn writeMessage(self: *McpTransport, data: []const u8) !void {
-        self.stdout_mutex.lock();
-        defer self.stdout_mutex.unlock();
-        try self.stdout_file.writeAll(data);
-        try self.stdout_file.writeAll("\n");
+    pub fn writeMessage(self: *McpTransport, io: std.Io, data: []const u8) !void {
+        try self.stdout_mutex.lock(io);
+        defer self.stdout_mutex.unlock(io);
+        var buf: [4096]u8 = undefined;
+        var writer = self.stdout_file.writer(io, &buf);
+        try writer.interface.writeAll(data);
+        try writer.interface.writeAll("\n");
+        try writer.interface.flush();
     }
 };
 ```
 
-- Byte-by-byte read into `ArrayList` because we need owned memory per message
-- `BrokenPipe` → graceful `null` (EOF), not a hard error
-- Mutex on stdout for thread safety
+- Byte-by-byte read via the buffered `Io.Reader` interface because we need owned memory per message
+- `EndOfStream` → graceful `null` (EOF), not a hard error
+- `Io.Mutex` on stdout for thread safety
 - 1MB limit prevents OOM from malformed input
 
 ---
@@ -96,7 +99,7 @@ pub const McpTransport = struct {
 ```zig
 pub const LspTransport = struct {
     pub const Reader = struct {
-        file: std.fs.File,
+        file: std.Io.File,
         buf: [8192]u8 = undefined,
         buf_start: usize = 0,
         buf_end: usize = 0,
@@ -140,7 +143,7 @@ pub const LspTransport = struct {
     };
 
     /// Write with Content-Length header using fixed stack buffer.
-    pub fn writeMessage(file: std.fs.File, data: []const u8) !void {
+    pub fn writeMessage(file: std.Io.File, data: []const u8) !void {
         var header_buf: [64]u8 = undefined;
         var header_w: std.Io.Writer = .fixed(&header_buf);
         try header_w.print("Content-Length: {d}\r\n\r\n", .{data.len});
@@ -159,28 +162,30 @@ pub const LspTransport = struct {
 
 ## Thread Model & Request Correlation
 
+**0.16:** `std.Thread.Mutex` and `std.Thread.ResetEvent` are removed — use `std.Io.Mutex` and `std.Io.Event` (both need `io: Io`; see [std.Thread reference](std-thread.md)):
+
 ```zig
 const PendingRequest = struct {
     response: ?[]const u8 = null,
-    event: std.Thread.ResetEvent = .{},
+    event: std.Io.Event = .unset,
     allocator: std.mem.Allocator,
 };
 
 pub const LspClient = struct {
     next_id: std.atomic.Value(i64) = std.atomic.Value(i64).init(1),
     pending: std.AutoHashMapUnmanaged(i64, *PendingRequest),
-    pending_mutex: std.Thread.Mutex = .{},
+    pending_mutex: std.Io.Mutex = .init,
     running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
     /// Main thread: send request, block until reader thread delivers response.
-    pub fn sendRequest(self: *LspClient, allocator: std.mem.Allocator, method: []const u8, params: anytype) ![]const u8 {
+    pub fn sendRequest(self: *LspClient, io: std.Io, allocator: std.mem.Allocator, method: []const u8, params: anytype) ![]const u8 {
         const id = self.next_id.fetchAdd(1, .monotonic);
         const pending = try self.allocator.create(PendingRequest);
         pending.* = .{ .allocator = self.allocator };
 
-        { self.pending_mutex.lock(); defer self.pending_mutex.unlock();
+        { try self.pending_mutex.lock(io); defer self.pending_mutex.unlock(io);
           try self.pending.put(self.allocator, id, pending); }
-        errdefer { self.pending_mutex.lock(); defer self.pending_mutex.unlock();
+        errdefer { self.pending_mutex.lock(io) catch {}; defer self.pending_mutex.unlock(io);
                    _ = self.pending.remove(id); self.allocator.destroy(pending); }
 
         const msg = try json_rpc.writeRequest(allocator, .{ .integer = id }, method, params);
@@ -188,7 +193,7 @@ pub const LspClient = struct {
         try LspTransport.writeMessage(stdin, msg);
 
         // Block with 30s timeout
-        pending.event.timedWait(30 * std.time.ns_per_s) catch {
+        pending.event.waitTimeout(io, .{ .duration = .{ .raw = .fromSeconds(30), .clock = .awake } }) catch {
             // Cleanup and return timeout error
             return error.RequestTimeout;
         };
@@ -199,11 +204,11 @@ pub const LspClient = struct {
     }
 
     /// Reader thread: match response ID → wake blocked sender.
-    fn readerLoop(self: *LspClient) void {
+    fn readerLoop(self: *LspClient, io: std.Io) void {
         while (self.running.load(.acquire)) {
-            const data = reader.readMessage(self.allocator) catch { self.signalAllPending(); return; };
-            if (data == null) { self.signalAllPending(); return; }
-            // Parse, extract "id", lookup pending, set response, event.set()
+            const data = reader.readMessage(self.allocator) catch { self.signalAllPending(io); return; };
+            if (data == null) { self.signalAllPending(io); return; }
+            // Parse, extract "id", lookup pending, set response, event.set(io)
         }
     }
 };
@@ -211,7 +216,7 @@ pub const LspClient = struct {
 
 - Single writer to ZLS stdin (main thread), single reader from ZLS stdout (reader thread)
 - Mutex only protects HashMap insert/remove — no lock on I/O
-- `ResetEvent` blocks main thread until reader delivers response
+- `Io.Event` blocks main thread until reader delivers response
 - `signalAllPending()` wakes all blocked requests when ZLS crashes (prevents deadlock)
 - Response duped to caller's allocator (reader uses long-lived allocator)
 
@@ -399,7 +404,7 @@ pub fn ensureOpen(self: *DocumentState, lsp_client: *LspClient, file_path: []con
       if (self.open_docs.get(file_uri)) |_| return try ret_allocator.dupe(u8, file_uri); }
 
     // Slow path: read file OUTSIDE the lock (no mutex held during I/O)
-    const content = std.fs.cwd().readFileAlloc(self.allocator, abs_path, 10 * 1024 * 1024) catch ...;
+    const content = std.Io.Dir.cwd().readFileAlloc(self.allocator, abs_path, 10 * 1024 * 1024) catch ...;
     defer self.allocator.free(content);
 
     // Re-acquire lock, double-check, then register

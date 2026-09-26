@@ -102,7 +102,8 @@ const Component = union(enum) {
 ### Getting Host
 
 ```zig
-var buffer: [std.Uri.host_name_max]u8 = undefined;
+// 0.16: no std.Uri.host_name_max — use std.Io.net.HostName.max_len; getHost() returns a HostName, not a raw slice
+var buffer: [std.Io.net.HostName.max_len]u8 = undefined;
 const host = uri.getHost(&buffer) catch |err| switch (err) {
     error.UriMissingHost => return error.NoHost,
     error.UriHostTooLong => return error.HostTooLong,
@@ -167,8 +168,8 @@ const formatted = writer.buffered();  // "https://example.com:8080/path?query#fr
 var buf: [1024]u8 = undefined;
 var writer: std.Io.Writer = .fixed(&buf);
 
-// Format only specific parts
-try std.fmt.format(&writer, "{f}", .{uri.fmt(.{
+// Format only specific parts — std.fmt.format (free function) is gone; call .print on the writer
+try writer.print("{f}", .{uri.fmt(.{
     .scheme = true,
     .authority = true,
     .path = true,
@@ -333,7 +334,13 @@ const name = getQueryParam(uri, "name");  // "alice"
 
 ### Build URL with Query Parameters
 
+**Note (0.16):** `std.Uri.isUnreserved` is not public — it never was part of the API contract, and 0.16 still doesn't export it. Define your own RFC 3986 `unreserved` predicate (`ALPHA / DIGIT / "-" / "." / "_" / "~"`):
+
 ```zig
+fn isUnreserved(c: u8) bool {
+    return std.ascii.isAlphanumeric(c) or c == '-' or c == '.' or c == '_' or c == '~';
+}
+
 fn buildUrl(allocator: Allocator, base: []const u8, params: []const [2][]const u8) ![]u8 {
     var result: std.ArrayList(u8) = .empty;
     defer result.deinit(allocator);
@@ -345,7 +352,7 @@ fn buildUrl(allocator: Allocator, base: []const u8, params: []const [2][]const u
 
         // Encode key
         for (param[0]) |c| {
-            if (std.Uri.isUnreserved(c)) {
+            if (isUnreserved(c)) {
                 try result.append(allocator, c);
             } else {
                 try result.appendSlice(allocator, try std.fmt.allocPrint(allocator, "%{X:0>2}", .{c}));
@@ -356,7 +363,7 @@ fn buildUrl(allocator: Allocator, base: []const u8, params: []const [2][]const u
 
         // Encode value
         for (param[1]) |c| {
-            if (std.Uri.isUnreserved(c)) {
+            if (isUnreserved(c)) {
                 try result.append(allocator, c);
             } else {
                 try result.appendSlice(allocator, try std.fmt.allocPrint(allocator, "%{X:0>2}", .{c}));
@@ -434,7 +441,7 @@ fn getBaseUrl(allocator: Allocator, uri: std.Uri) ![]u8 {
     var buf: [1024]u8 = undefined;
     var writer: std.Io.Writer = .fixed(&buf);
 
-    try std.fmt.format(&writer, "{f}", .{uri.fmt(.{
+    try writer.print("{f}", .{uri.fmt(.{
         .scheme = true,
         .authority = true,
         .port = true,

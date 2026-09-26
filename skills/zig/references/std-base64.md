@@ -69,7 +69,7 @@ const decoded = buf[0..decoded_len];
 
 ```zig
 var buf: [4096]u8 = undefined;
-var writer = std.fs.File.stdout().writer(&buf);
+var writer = std.Io.File.stdout().writer(io, &buf);
 
 try base64.standard.Encoder.encodeWriter(&writer.interface, data);
 try writer.interface.flush();

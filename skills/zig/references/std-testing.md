@@ -228,8 +228,22 @@ comptime {
 }
 
 // Recursive version for nested types
+// 0.16: std.testing.refAllDeclsRecursive is gone — only the non-recursive refAllDecls remains.
+// Write your own recursion if you need to reach into nested container types:
+fn refAllDeclsRecursive(comptime T: type) void {
+    inline for (comptime std.meta.declarations(T)) |decl| {
+        if (@TypeOf(@field(T, decl.name)) == type) {
+            switch (@typeInfo(@field(T, decl.name))) {
+                .@"struct", .@"enum", .@"union", .@"opaque" => refAllDeclsRecursive(@field(T, decl.name)),
+                else => {},
+            }
+        }
+        _ = &@field(T, decl.name);
+    }
+}
+
 comptime {
-    std.testing.refAllDeclsRecursive(@This());
+    refAllDeclsRecursive(@This());
 }
 ```
 

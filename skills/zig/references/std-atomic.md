@@ -295,19 +295,20 @@ fn Stack(comptime T: type) type {
 ### Once Initialization (Double-Checked Locking)
 
 ```zig
+// 0.16: std.Thread.Mutex removed — std.Io.Mutex needs an `io: Io` (see std-thread.md)
 var initialized = std.atomic.Value(bool).init(false);
-var init_mutex: std.Thread.Mutex = .{};
+var init_mutex: std.Io.Mutex = .init;
 var global_resource: ?*Resource = null;
 
-fn getResource() *Resource {
+fn getResource(io: std.Io) !*Resource {
     // Fast path: already initialized
     if (initialized.load(.acquire)) {
         return global_resource.?;
     }
 
     // Slow path: initialize with lock
-    init_mutex.lock();
-    defer init_mutex.unlock();
+    try init_mutex.lock(io);
+    defer init_mutex.unlock(io);
 
     if (!initialized.load(.acquire)) {
         global_resource = initializeResource();

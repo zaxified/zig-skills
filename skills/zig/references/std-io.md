@@ -49,11 +49,11 @@ try stdout.print("Hello\n", .{});
 var bw = std.io.bufferedWriter(file.writer());
 ```
 
-### New API (0.15.x)
+### New API (buffer-integrated writer, introduced in 0.15; 0.16 form)
 ```zig
-// CORRECT - new buffer-integrated writer
+// CORRECT - new buffer-integrated writer; 0.16 also passes the `io` instance
 var buf: [4096]u8 = undefined;
-var writer = std.fs.File.stdout().writer(&buf);
+var writer = std.Io.File.stdout().writer(io, &buf);
 const stdout = &writer.interface;
 try stdout.print("Hello\n", .{});
 try stdout.flush();  // REQUIRED!
@@ -328,11 +328,11 @@ var limited = r.limited(.limited(1024), &limited_buf);
 
 ### Reading Files
 ```zig
-const file = try std.fs.cwd().openFile("data.txt", .{});
+const file = try std.Io.Dir.cwd().openFile("data.txt", .{});
 defer file.close();
 
 var buf: [4096]u8 = undefined;
-var reader = file.reader(&buf);
+var reader = file.reader(io, &buf);
 const r = &reader.interface;
 
 // Read lines (takeDelimiter returns null at EOF, no error)
@@ -344,11 +344,11 @@ while (try r.takeDelimiter('\n')) |line| {
 
 ### Writing Files
 ```zig
-const file = try std.fs.cwd().createFile("out.txt", .{});
+const file = try std.Io.Dir.cwd().createFile("out.txt", .{});
 defer file.close();
 
 var buf: [4096]u8 = undefined;
-var writer = file.writer(&buf);
+var writer = file.writer(io, &buf);
 const w = &writer.interface;
 
 try w.print("Hello {s}\n", .{"world"});
@@ -360,7 +360,7 @@ try w.flush();  // REQUIRED!
 ```zig
 // Stdout
 var stdout_buf: [4096]u8 = undefined;
-var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
 const stdout = &stdout_writer.interface;
 
 try stdout.print("Output: {d}\n", .{42});
@@ -368,7 +368,7 @@ try stdout.flush();
 
 // Stderr
 var stderr_buf: [4096]u8 = undefined;
-var stderr_writer = std.fs.File.stderr().writer(&stderr_buf);
+var stderr_writer = std.Io.File.stderr().writer(io, &stderr_buf);
 const stderr = &stderr_writer.interface;
 
 try stderr.print("Error: {s}\n", .{msg});
@@ -378,7 +378,7 @@ try stderr.flush();
 ### Stdin
 ```zig
 var stdin_buf: [4096]u8 = undefined;
-var stdin_reader = std.fs.File.stdin().reader(&stdin_buf);
+var stdin_reader = std.Io.File.stdin().reader(io, &stdin_buf);
 const stdin = &stdin_reader.interface;
 
 // takeDelimiter returns ?[]u8 (null at EOF), wrapped in error union
@@ -448,11 +448,11 @@ defer _ = gpa.deinit();
 ### Process Lines from File
 ```zig
 fn processLines(path: []const u8) !void {
-    const file = try std.fs.cwd().openFile(path, .{});
+    const file = try std.Io.Dir.cwd().openFile(path, .{});
     defer file.close();
 
     var buf: [8192]u8 = undefined;
-    var reader = file.reader(&buf);
+    var reader = file.reader(io, &buf);
     const r = &reader.interface;
 
     // takeDelimiter returns null at EOF (not EndOfStream error)
@@ -465,17 +465,17 @@ fn processLines(path: []const u8) !void {
 ### Copy File
 ```zig
 fn copyFile(src_path: []const u8, dst_path: []const u8) !void {
-    const src = try std.fs.cwd().openFile(src_path, .{});
+    const src = try std.Io.Dir.cwd().openFile(src_path, .{});
     defer src.close();
 
-    const dst = try std.fs.cwd().createFile(dst_path, .{});
+    const dst = try std.Io.Dir.cwd().createFile(dst_path, .{});
     defer dst.close();
 
     var read_buf: [4096]u8 = undefined;
-    var reader = src.reader(&read_buf);
+    var reader = src.reader(io, &read_buf);
 
     var write_buf: [4096]u8 = undefined;
-    var writer = dst.writer(&write_buf);
+    var writer = dst.writer(io, &write_buf);
 
     _ = try reader.interface.streamRemaining(&writer.interface);
     try writer.interface.flush();
@@ -491,9 +491,9 @@ const FileHeader = extern struct {
     data_offset: u64,
 };
 
-fn parseHeader(file: std.fs.File) !FileHeader {
+fn parseHeader(file: std.Io.File) !FileHeader {
     var buf: [128]u8 = undefined;
-    var reader = file.reader(&buf);
+    var reader = file.reader(io, &buf);
     const r = &reader.interface;
 
     const header = try r.takeStruct(FileHeader, .little);
@@ -522,12 +522,12 @@ fn buildMessage(allocator: Allocator, items: []const Item) ![]u8 {
 
 ### Streaming JSON to File
 ```zig
-fn writeJson(file: std.fs.File, data: anytype) !void {
+fn writeJson(file: std.Io.File, data: anytype) !void {
     var buf: [4096]u8 = undefined;
-    var writer = file.writer(&buf);
+    var writer = file.writer(io, &buf);
     const w = &writer.interface;
 
-    try std.json.stringify(data, .{}, w);
+    try std.json.Stringify.value(data, .{}, w);
     try w.writeByte('\n');
     try w.flush();
 }

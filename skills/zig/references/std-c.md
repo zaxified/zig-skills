@@ -27,10 +27,10 @@ Use `std.c` when:
 Prefer higher-level alternatives when available:
 ```zig
 // High-level (recommended)
-const file = try std.fs.cwd().openFile("data.txt", .{});
+const file = try std.Io.Dir.cwd().openFile("data.txt", .{});
 
-// POSIX-level
-const fd = try std.posix.open("data.txt", .{}, 0);
+// POSIX-level — 0.16: std.posix.open is gone, use openat with AT.FDCWD
+const fd = try std.posix.openat(std.posix.AT.FDCWD, "data.txt", .{}, 0);
 
 // C-level (direct libc, lowest level)
 const fd = std.c.open("data.txt", .{}, 0);
@@ -787,50 +787,51 @@ c.getcontext           // Get current context (some platforms)
 ## Platform-Specific Submodules
 
 ### darwin (macOS/iOS)
-```zig
-const darwin = std.c.darwin;  // Internal, re-exported via std.c
 
+**0.16 change:** `std.c.darwin` is not a public namespace (it's a private import inside `c.zig`) — Darwin-specific declarations are flattened directly onto `std.c` itself.
+
+```zig
 // Mach types and functions
-darwin.mach_port_t
-darwin.mach_task_self()
-darwin.mach_msg()
-darwin.mach_host_self()
-darwin.mach_timebase_info()
-darwin.mach_absolute_time()
+std.c.mach_port_t
+std.c.mach_task_self()
+std.c.mach_msg()
+std.c.mach_host_self()
+std.c.mach_timebase_info()
+std.c.mach_absolute_time()
 
 // Exception handling
-darwin.EXC, darwin.EXCEPTION
-darwin.task_set_exception_ports()
-darwin.task_get_exception_ports()
+std.c.EXC, std.c.EXCEPTION
+std.c.task_set_exception_ports()
+std.c.task_get_exception_ports()
 
 // Thread state
-darwin.thread_state
-darwin.thread_get_state()
-darwin.thread_set_state()
+std.c.thread_state_t
+std.c.thread_get_state()
+std.c.thread_set_state()
 
 // VM operations
-darwin.mach_vm_read()
-darwin.mach_vm_write()
-darwin.mach_vm_protect()
-darwin.mach_vm_region()
+std.c.mach_vm_read()
+std.c.mach_vm_write()
+std.c.mach_vm_protect()
+std.c.mach_vm_region()
 
-// Dispatch/GCD semaphores
-darwin.dispatch_semaphore_create()
-darwin.dispatch_semaphore_wait()
-darwin.dispatch_semaphore_signal()
+// GCD (libdispatch) semaphores are NOT wrapped by std.c — declare them yourself if you link libdispatch:
+extern "c" fn dispatch_semaphore_create(value: isize) ?*anyopaque;
+extern "c" fn dispatch_semaphore_wait(sem: *anyopaque, timeout: u64) isize;
+extern "c" fn dispatch_semaphore_signal(sem: *anyopaque) isize;
 
 // Unfair locks
-darwin.os_unfair_lock
-darwin.os_unfair_lock_lock()
-darwin.os_unfair_lock_unlock()
+std.c.os_unfair_lock
+std.c.os_unfair_lock_lock()
+std.c.os_unfair_lock_unlock()
 
 // Process spawning
-darwin.posix_spawn()
-darwin.posix_spawn_file_actions_*
+std.c.posix_spawn()
+std.c.posix_spawn_file_actions_init()  // and friends
 
 // File copy
-darwin.fcopyfile()
-darwin.COPYFILE
+std.c.fcopyfile()
+std.c.COPYFILE
 ```
 
 ### freebsd
@@ -861,8 +862,8 @@ std.c.bcrypt()
 std.c.bcrypt_newhash()
 std.c.bcrypt_checkpass()
 
-// BSD authentication
-std.c.auth_*  // Various auth functions
+// BSD authentication (e.g. std.c.auth_userokay, std.c.auth_approval, std.c.auth_call, ...)
+std.c.auth_userokay()
 
 // Login capabilities
 std.c.login_getclass()
@@ -932,9 +933,12 @@ if (std.c.versionCheck(.{ .major = 2, .minor = 28, .patch = 0 })) {
 ```
 
 ### FFI with C Libraries
+
+**Note:** `size_t`/`ssize_t` are not `std.c` members — use Zig's own `usize`/`isize` (the ABI-matching types for C's `size_t`/`ssize_t`). `c_int` is a builtin primitive type, not `std.c.c_int`.
+
 ```zig
 // Declare external C function
-extern "c" fn c_function(fd: std.c.fd_t, buf: [*]u8, len: std.c.size_t) std.c.ssize_t;
+extern "c" fn c_function(fd: std.c.fd_t, buf: [*]u8, len: usize) isize;
 
 // Use std.c types for ABI compatibility
 pub fn wrapper(fd: std.posix.fd_t, buf: []u8) !usize {
@@ -954,12 +958,12 @@ const builtin = @import("builtin");
 fn platformSpecificCall() void {
     switch (builtin.os.tag) {
         .linux => {
-            // Linux uses c_int for some syscalls
-            const result: std.c.c_int = ...;
+            // Linux uses c_int for some syscalls (builtin type, not std.c.c_int)
+            const result: c_int = ...;
         },
         .macos, .ios => {
-            // Darwin uses different types
-            const port = std.c.darwin.mach_port_t;
+            // Darwin uses different types (flattened onto std.c, no .darwin namespace)
+            const port = std.c.mach_port_t;
         },
         .windows => {
             // Windows uses HANDLE

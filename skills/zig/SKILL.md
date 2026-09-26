@@ -173,18 +173,47 @@ fn milliTimestamp() i64 {
 
 **Note:** `ts.nsec` is signed — use `@divTrunc`, not `/` (0.16 enforces this for signed division).
 
-`std.time.ns_per_s`, `Instant`, `Timer` — **still present**.
+`std.time.ns_per_s` and the other unit constants are **still present**. `std.time.Instant` and `std.time.Timer` are **also removed** in 0.16 — monotonic timing now goes through `std.Io.Clock` (e.g. `Io.Clock.now(io, .awake)`, `.durationTo()`/`.untilNow()`), which likewise needs an `Io` instance. See [std.time reference](references/std-time.md).
 
 ## Critical: Thread Primitives Removed (0.16)
 
-`std.Thread.Mutex`, `std.Thread.Condition`, `std.Thread.sleep` are **removed**. The 0.16 replacements (`std.Io.Mutex`/`std.Io.Condition`) require an `Io` instance. For library code without `Io`, use POSIX shims:
+`std.Thread.Mutex`, `std.Thread.Mutex.Recursive`, `std.Thread.Condition`, `std.Thread.RwLock`, `std.Thread.Semaphore`, `std.Thread.Futex`, `std.Thread.Pool`, `std.Thread.WaitGroup`, `std.Thread.ResetEvent`, and `std.Thread.sleep` are **all removed**.
+
+**First choice — you have an `Io` instance:** use `std.Io.Mutex` / `std.Io.Condition` / `std.Io.RwLock` / `std.Io.Semaphore` (each method takes `io: Io`), `io.futexWait`/`io.futexWake` for raw futex ops, and `io.sleep(duration, clock)` instead of `Thread.sleep`.
 
 ```zig
 // WRONG (0.16)
 var mutex: std.Thread.Mutex = .{};
 mutex.lock();
 
-// CORRECT — pthread shim (works without Io)
+// CORRECT — std.Io.Mutex, needs an `io: Io`
+var mutex: std.Io.Mutex = .init;
+try mutex.lock(io);
+defer mutex.unlock(io);
+```
+
+**Library code with no `Io` available, on Linux:** build a tiny lock on the raw futex syscall (`std.os.linux.futex`), not libc:
+
+```zig
+const FutexLock = struct {
+    state: std.atomic.Value(u32) = .init(0), // 0 = unlocked, 1 = locked
+
+    pub fn lock(l: *FutexLock) void {
+        while (l.state.swap(1, .acquire) != 0) {
+            _ = std.os.linux.futex_4arg(&l.state.raw, .{ .cmd = .WAIT, .private = true }, 1, null);
+        }
+    }
+
+    pub fn unlock(l: *FutexLock) void {
+        l.state.store(0, .release);
+        _ = std.os.linux.futex_3arg(&l.state.raw, .{ .cmd = .WAKE, .private = true }, 1);
+    }
+};
+```
+
+**Last resort — code that already links libc, needs to run on non-Linux too:** the POSIX pthread shim:
+
+```zig
 const PthreadMutex = struct {
     inner: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
     pub fn lock(m: *@This()) void { _ = std.c.pthread_mutex_lock(&m.inner); }
@@ -194,7 +223,7 @@ const PthreadMutex = struct {
     }
 };
 
-// std.Thread.sleep → nanosleep
+// std.Thread.sleep → nanosleep (no Io, already linking libc)
 fn threadSleep(ns: u64) void {
     const ts = std.c.timespec{
         .sec = @intCast(ns / std.time.ns_per_s),
@@ -237,7 +266,7 @@ arc4random_buf(&nonce, nonce.len);  // macOS + Linux glibc 2.36+
 _ = std.os.linux.getrandom(buf.ptr, buf.len, 0);
 ```
 
-**Note:** `std.posix.getrandom` does NOT exist in 0.16.
+**Note:** `std.posix.getrandom` does NOT exist in 0.16. If you already have an `io: Io`, the portable option is `io.randomSecure(buffer)` (or seed `std.Random.DefaultCsprng` from it for the full `std.Random` interface) instead of the platform externs above — see [std.crypto reference](references/std-crypto.md).
 
 ## Critical: Scoping Rule Tightened (0.16)
 
@@ -265,18 +294,21 @@ const stdout = std.io.getStdOut().writer();
 try stdout.print("Hello\n", .{});
 
 // CORRECT - new API: provide buffer, access .interface, flush
+// `io` comes from an `Io` implementation (e.g. `std.Io.Threaded.init(gpa, .{}).io()`)
 var buf: [4096]u8 = undefined;
-var stdout_writer = std.fs.File.stdout().writer(&buf);
+var stdout_writer = std.Io.File.stdout().writer(io, &buf);
 const stdout = &stdout_writer.interface;
 try stdout.print("Hello\n", .{});
 try stdout.flush();  // REQUIRED!
 ```
 
+**Note (0.16):** `std.fs.File` is gone — file handles are `std.Io.File` now, and `.reader()`/`.writer()` take an `io: Io` argument (`file.writer(io, &buf)`), because the actual read/write syscalls go through the `Io` implementation.
+
 ### Reading
 ```zig
 // Reading from file
 var buf: [4096]u8 = undefined;
-var file_reader = file.reader(&buf);
+var file_reader = file.reader(io, &buf);
 const r = &file_reader.interface;
 
 // Read line by line (takeDelimiter returns null at EOF)
@@ -614,8 +646,8 @@ HTTP client/server completely restructured — depends only on I/O streams, not 
 // Server now takes Reader/Writer interfaces, not connection directly
 var recv_buffer: [4000]u8 = undefined;
 var send_buffer: [4000]u8 = undefined;
-var conn_reader = connection.stream.reader(&recv_buffer);
-var conn_writer = connection.stream.writer(&send_buffer);
+var conn_reader = connection.stream.reader(io, &recv_buffer);
+var conn_writer = connection.stream.writer(io, &send_buffer);
 var server = std.http.Server.init(
     conn_reader.interface(),
     &conn_writer.interface,
@@ -632,7 +664,7 @@ var server = std.http.Server.init(
 | `'std.net' has no member 'Address'` | Use `std.Io.net.IpAddress.parse(host, port)` (0.16) |
 | `no field 'addIncludePath' in 'Compile'` | Methods moved: `lib.root_module.addIncludePath(...)` (0.16) |
 | `'timestamp' not found in 'std.time'` | Removed: use `std.c.clock_gettime(.REALTIME, &ts)` (0.16) |
-| `'Mutex' not found in 'std.Thread'` | Removed: use POSIX `PthreadMutex` shim or `std.Io.Mutex` (0.16) |
+| `'Mutex' not found in 'std.Thread'` | Removed: use `std.Io.Mutex` (needs `Io`); no `Io`: raw futex on Linux, POSIX `PthreadMutex` shim as last resort (0.16) |
 | `'random' not found in 'std.crypto'` | Removed: use `arc4random_buf` or `std.os.linux.getrandom` (0.16) |
 | `'lockStderrWriter' not found` | Renamed: use `std.debug.lockStderr(&buf)` (0.16) |
 | `local constant shadows declaration` | 0.16 forbids local names matching module-level `extern fn` — rename local |

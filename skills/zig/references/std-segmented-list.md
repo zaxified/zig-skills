@@ -1,5 +1,7 @@
 # std.SegmentedList
 
+**Removed in 0.16:** `std.SegmentedList` no longer exists anywhere in std, with no direct replacement. This page is kept as historical reference for the technique (stable-pointer growth via exponentially-sized segments); porting code that used it means vendoring or reimplementing the data structure yourself.
+
 A dynamic list where element pointers remain stable across growth. Unlike ArrayList, appending never invalidates existing pointers. Elements are stored in exponentially-sized segments.
 
 ## When to Use
@@ -19,11 +21,13 @@ A dynamic list where element pointers remain stable across growth. Unlike ArrayL
 
 ```zig
 // Without preallocation
+// OLD — std.SegmentedList removed in 0.16, shown for reference only
 var list = std.SegmentedList(i32, 0){};
 defer list.deinit(allocator);
 
 // With preallocation (must be power of 2)
 // First N elements stored inline, no allocation needed
+// OLD — std.SegmentedList removed in 0.16, shown for reference only
 var list = std.SegmentedList(i32, 16){};
 defer list.deinit(allocator);
 ```
@@ -129,6 +133,7 @@ const Object = struct {
     next: ?*Object,
 };
 
+// OLD — std.SegmentedList removed in 0.16, shown for reference only
 var pool = std.SegmentedList(Object, 64){};
 
 // Create objects - pointers remain valid

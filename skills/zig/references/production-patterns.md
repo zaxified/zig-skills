@@ -201,7 +201,10 @@ Thread-local heaps eliminate contention. Borrowed/Owned makes ownership clear at
 
 ### Segmented Pool for Stable Pointers (Ghostty)
 
+**Removed in 0.16:** `std.SegmentedList` no longer exists in std (no direct replacement). The pattern below is kept as reference for the *idea* (grow without invalidating existing pointers); porting it means vendoring or reimplementing a segmented list yourself.
+
 ```zig
+// OLD (0.15.x) — std.SegmentedList removed in 0.16, shown for the pattern only
 pub fn SegmentedPool(comptime T: type, comptime prealloc: usize) type {
     return struct {
         list: std.SegmentedList(T, prealloc) = .{ .len = prealloc },
@@ -311,23 +314,25 @@ Power-of-two sizing with bit masking. Overflow area for probe chains. Zero alloc
 
 ### Blocking Queue for Message Passing (Ghostty)
 
+**0.16:** `std.Thread.Mutex`/`std.Thread.Condition` are removed — use `std.Io.Mutex`/`std.Io.Condition`, which need an `io: Io` on every call. `Io.Condition` has `wait(io, mutex)` (cancelable) but no built-in `timedWait`; a bounded wait needs a separate cancellation/timeout mechanism at the `Io` level (e.g. racing the wait against `io.sleep`), not shown here for brevity — only the `.forever` case is a direct port:
+
 ```zig
 pub fn BlockingQueue(comptime T: type, comptime capacity: usize) type {
     return struct {
         data: [capacity]T = undefined,
         write: u32 = 0,
         read: u32 = 0,
-        mutex: std.Thread.Mutex = .{},
-        cond_not_full: std.Thread.Condition = .{},
+        mutex: std.Io.Mutex = .init,
+        cond_not_full: std.Io.Condition = .init,
 
-        pub fn push(self: *Self, value: T, timeout: Timeout) u32 {
-            self.mutex.lock();
-            defer self.mutex.unlock();
+        pub fn push(self: *Self, io: std.Io, value: T, timeout: Timeout) !u32 {
+            try self.mutex.lock(io);
+            defer self.mutex.unlock(io);
             if (self.full()) {
                 switch (timeout) {
                     .instant => return 0,
-                    .forever => self.cond_not_full.wait(&self.mutex),
-                    .ns => |ns| self.cond_not_full.timedWait(&self.mutex, ns) catch return 0,
+                    .forever => try self.cond_not_full.wait(io, &self.mutex),
+                    // .ns => bounded wait: needs a timeout mechanism on top of `wait`, see note above
                 }
             }
             // ... enqueue

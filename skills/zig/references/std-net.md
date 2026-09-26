@@ -34,21 +34,28 @@ In Zig 0.16, `std.net` is entirely removed. All networking now goes through `std
 
 ### Io Runtime Setup
 
-All networking in 0.16 requires an `Io` instance. You obtain it from `std.Io.init()`.
+All networking in 0.16 requires an `Io` instance. There is no bare `std.Io.init()` — you construct a concrete `Io` implementation (e.g. `std.Io.Threaded`, the thread-pool-backed one) and get an `Io` value from its `.io()` method:
 
 ```zig
-// CORRECT (0.16): Obtain Io runtime
+// CORRECT (0.16): Obtain an Io runtime from std.Io.Threaded
 const std = @import("std");
 
 pub fn main() !void {
-    var io = std.Io.init(.{});
-    defer io.deinit();
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = gpa.deinit();
+
+    var threaded: std.Io.Threaded = .init(gpa.allocator(), .{});
+    defer threaded.deinit();
+    const io = threaded.io();
 
     // Pass `io` to all networking operations
-    const net = io.net;
+    const net = std.Io.net;
     _ = net;
+    _ = io;
 }
 ```
+
+If you control `main` itself (not a library), it's simpler to let the runtime build the `Io` for you: give `main` a single `std.process.Init` parameter (`pub fn main(init: std.process.Init) !void { const io = init.io; ... }`) and it already contains a ready-made `io` (plus `gpa`, `arena`, `environ_map`, ...), with no manual `Io.Threaded` setup needed.
 
 ### TCP Client Migration
 
@@ -95,15 +102,18 @@ defer conn.stream.close();
 const std = @import("std");
 
 pub fn main() !void {
-    var io = std.Io.init(.{});
-    defer io.deinit();
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = gpa.deinit();
+    var threaded: std.Io.Threaded = .init(gpa.allocator(), .{});
+    defer threaded.deinit();
+    const io = threaded.io();
 
-    const address = std.Io.net.IpAddress.parse("0.0.0.0", 8080);
-    var server = try address.listen(&io, .{ .reuse_address = true });
-    defer server.deinit(&io);
+    const address = try std.Io.net.IpAddress.parse("0.0.0.0", 8080);
+    var server = try address.listen(io, .{ .reuse_address = true });
+    defer server.deinit(io);
 
-    const stream = try server.accept(&io);
-    defer stream.close(&io);
+    const stream = try server.accept(io);
+    defer stream.close(io);
 }
 ```
 
@@ -257,7 +267,7 @@ if (std.Io.net.has_unix_sockets) { ... }
 
 ```zig
 const std = @import("std");
-const net = std.net;
+const net = std.net;  // OLD (0.15.x) — std.net removed in 0.16, see 0.16 Migration above
 
 pub fn main() !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
@@ -316,7 +326,7 @@ const link_local = try net.Address.resolveIp6("fe80::1%eth0", 8080);
 
 ```zig
 const std = @import("std");
-const net = std.net;
+const net = std.net;  // OLD (0.15.x) — std.net removed in 0.16, see 0.16 Migration above
 
 pub fn main() !void {
     // Create address to listen on
@@ -515,7 +525,7 @@ const stream = try net.tcpConnectToHost(allocator, "example.com", 80);
 defer stream.close();
 
 var buf: [4096]u8 = undefined;
-var reader = stream.reader(&buf);
+var reader = stream.reader(io, &buf);
 const r = reader.interface();
 
 // Read bytes
@@ -542,7 +552,7 @@ _ = try r.streamRemaining(&output_writer);
 
 ```zig
 var buf: [1024]u8 = undefined;
-var writer = stream.writer(&buf);
+var writer = stream.writer(io, &buf);
 const w = &writer.interface;
 
 // Write bytes
@@ -558,7 +568,7 @@ try w.flush();
 ### Error Handling
 
 ```zig
-var reader = stream.reader(&buf);
+var reader = stream.reader(io, &buf);
 const r = reader.interface();
 
 const data = r.take(100) catch |err| switch (err) {
@@ -584,7 +594,7 @@ const data = r.take(100) catch |err| switch (err) {
 
 ```zig
 const std = @import("std");
-const net = std.net;
+const net = std.net;  // OLD (0.15.x) — std.net removed in 0.16, see 0.16 Migration above
 
 pub fn main() !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
@@ -641,8 +651,8 @@ const stream = try net.connectUnixSocket("/var/run/app.sock");
 defer stream.close();
 
 var buf: [4096]u8 = undefined;
-var reader = stream.reader(&buf);
-var writer = stream.writer(&buf);
+var reader = stream.reader(io, &buf);
+var writer = stream.writer(io, &buf);
 // ... use like TCP
 ```
 
@@ -653,8 +663,8 @@ const address = try net.Address.initUnix("/tmp/my.sock");
 var server = try address.listen(.{ .reuse_address = true });
 defer server.deinit();
 
-// Remove socket file on cleanup
-defer std.fs.deleteFileAbsolute("/tmp/my.sock") catch {};
+// Remove socket file on cleanup (0.16: needs `io`, moved under Io.Dir)
+defer std.Io.Dir.deleteFileAbsolute(io, "/tmp/my.sock") catch {};
 
 while (true) {
     const conn = try server.accept();
@@ -669,7 +679,7 @@ while (true) {
 
 ```zig
 const std = @import("std");
-const net = std.net;
+const net = std.net;  // OLD (0.15.x) — std.net removed in 0.16, see 0.16 Migration above
 
 pub fn main() !void {
     const address = net.Address.initIp4(.{ 0, 0, 0, 0 }, 7);  // echo port
@@ -699,7 +709,7 @@ fn httpGet(allocator: Allocator, host: []const u8, path: []const u8) ![]u8 {
     defer stream.close();
 
     var write_buf: [1024]u8 = undefined;
-    var writer = stream.writer(&write_buf);
+    var writer = stream.writer(io, &write_buf);
     const w = &writer.interface;
 
     try w.print("GET {s} HTTP/1.1\r\n", .{path});
@@ -708,7 +718,7 @@ fn httpGet(allocator: Allocator, host: []const u8, path: []const u8) ![]u8 {
     try w.flush();
 
     var read_buf: [4096]u8 = undefined;
-    var reader = stream.reader(&read_buf);
+    var reader = stream.reader(io, &read_buf);
 
     var response: std.ArrayList(u8) = .empty;
     defer response.deinit(allocator);
@@ -729,7 +739,7 @@ fn httpGet(allocator: Allocator, host: []const u8, path: []const u8) ![]u8 {
 
 ```zig
 const std = @import("std");
-const net = std.net;
+const net = std.net;  // OLD (0.15.x) — std.net removed in 0.16, see 0.16 Migration above
 const posix = std.posix;
 
 fn acceptWithTimeout(server: *net.Server, timeout_ms: i32) !?net.Server.Connection {

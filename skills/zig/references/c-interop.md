@@ -818,10 +818,18 @@ export fn free_string(s: ?[*:0]u8) void {
 
 For thread-safe libraries, use atomics or mutexes:
 
+`std.Thread.Mutex` is removed in 0.16 (see [std.Thread reference](std-thread.md)), and its replacement `std.Io.Mutex` needs an `io: Io` argument — which an `export fn` called from C has no way to receive. This is exactly the case for the POSIX pthread shim (the library already links libc to be C-ABI-exported in the first place):
+
 ```zig
 const std = @import("std");
 
-var global_mutex: std.Thread.Mutex = .{};
+const PthreadMutex = struct {
+    inner: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
+    pub fn lock(m: *@This()) void { _ = std.c.pthread_mutex_lock(&m.inner); }
+    pub fn unlock(m: *@This()) void { _ = std.c.pthread_mutex_unlock(&m.inner); }
+};
+
+var global_mutex: PthreadMutex = .{};
 var shared_value: c_int = 0;
 
 export fn thread_safe_increment() c_int {

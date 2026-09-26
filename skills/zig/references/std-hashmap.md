@@ -14,8 +14,9 @@ std.StringHashMap(ValueType)
 std.StringHashMapUnmanaged(ValueType)
 
 // ArrayHashMap - preserves insertion order, fast iteration
-std.ArrayHashMap(K, V, Context, store_hash)
-std.StringArrayHashMap(V)
+// 0.16: no managed wrapper; use the unmanaged generics directly (see std-array-hash-map.md)
+std.array_hash_map.Custom(K, V, Context, store_hash)
+std.array_hash_map.String(V)
 ```
 
 ## AutoHashMap Usage
@@ -138,11 +139,11 @@ var map = std.HashMap(MyKey, Value, Context, 80).initContext(allocator, context)
 Preserves insertion order, supports indexed access:
 
 ```zig
-var map = std.StringArrayHashMap(i32).init(allocator);
-defer map.deinit();
+var map: std.array_hash_map.String(i32) = .empty;
+defer map.deinit(allocator);
 
-try map.put("b", 2);
-try map.put("a", 1);
+try map.put(allocator, "b", 2);
+try map.put(allocator, "a", 1);
 
 // Iterate in insertion order: "b", "a"
 for (map.keys(), map.values()) |k, v| { }

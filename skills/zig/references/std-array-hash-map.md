@@ -1,6 +1,8 @@
-# std.ArrayHashMap
+# std.ArrayHashMap (0.16)
 
 A hash map that preserves insertion order and stores keys/values in contiguous arrays. Combines hash table lookup with array-like iteration.
+
+**0.16 change:** the *managed* wrappers (`std.ArrayHashMap`, `std.AutoArrayHashMap`, `std.StringArrayHashMap` — the ones that store their own allocator) are **gone**. Only the unmanaged generics remain, and even the `...Unmanaged` names in `std.zig` (`std.ArrayHashMapUnmanaged`, `std.AutoArrayHashMapUnmanaged`, `std.StringArrayHashMapUnmanaged`) are marked deprecated in favor of calling `std.array_hash_map.Custom` / `.Auto` / `.String` directly. Every map is allocator-less: initialize with `.empty`, and pass `gpa` to any method that can grow the map (`put`, `getOrPut`, `ensureTotalCapacity`, `deinit`, ...).
 
 ## When to Use
 
@@ -13,23 +15,22 @@ A hash map that preserves insertion order and stores keys/values in contiguous a
 
 | Type | Description |
 |------|-------------|
-| `AutoArrayHashMap(K, V)` | Auto-hashing for common key types |
-| `ArrayHashMap(K, V, Ctx, store_hash)` | Custom hash/equal context |
-| `StringArrayHashMap(V)` | String keys |
-| `ArrayHashMapUnmanaged(...)` | No stored allocator |
+| `std.array_hash_map.Auto(K, V)` | Auto-hashing for common key types |
+| `std.array_hash_map.Custom(K, V, Ctx, store_hash)` | Custom hash/equal context |
+| `std.array_hash_map.String(V)` | String keys |
 
 ## Basic Usage
 
 ```zig
 const std = @import("std");
 
-var map = std.AutoArrayHashMap(u32, []const u8).init(allocator);
-defer map.deinit();
+var map: std.array_hash_map.Auto(u32, []const u8) = .empty;
+defer map.deinit(allocator);
 
 // Insert
-try map.put(1, "one");
-try map.put(2, "two");
-try map.put(3, "three");
+try map.put(allocator, 1, "one");
+try map.put(allocator, 2, "two");
+try map.put(allocator, 3, "three");
 
 // Lookup
 if (map.get(2)) |value| {
@@ -45,9 +46,9 @@ if (map.contains(1)) {
 ## Insertion Order Preserved
 
 ```zig
-try map.put(10, "ten");
-try map.put(5, "five");
-try map.put(15, "fifteen");
+try map.put(allocator, 10, "ten");
+try map.put(allocator, 5, "five");
+try map.put(allocator, 15, "fifteen");
 
 // Iteration is in insertion order: 10, 5, 15
 var it = map.iterator();
@@ -72,10 +73,10 @@ for (keys, values) |k, v| {
 ## Removal (Two Options)
 
 ```zig
-// O(1) removal - swaps with last element, changes order
+// O(1) removal - swaps with last element, changes order. Returns whether a key was removed.
 _ = map.swapRemove(key);
 
-// O(n) removal - shifts elements, preserves order
+// O(n) removal - shifts elements, preserves order. Returns whether a key was removed.
 _ = map.orderedRemove(key);
 
 // Fetch and remove
@@ -88,13 +89,13 @@ if (map.fetchSwapRemove(key)) |kv| {
 
 ```zig
 // Get existing or insert new
-const result = try map.getOrPut(key);
+const result = try map.getOrPut(allocator, key);
 if (!result.found_existing) {
     result.value_ptr.* = "new_value";
 }
 
 // Get or put with default value
-const result2 = try map.getOrPutValue(key, "default");
+const result2 = try map.getOrPutValue(allocator, key, "default");
 ```
 
 ## Index-Based Operations
@@ -112,24 +113,24 @@ if (map.getIndex(key)) |idx| {
 ## Capacity Management
 
 ```zig
-try map.ensureTotalCapacity(100);
-try map.ensureUnusedCapacity(10);
+try map.ensureTotalCapacity(allocator, 100);
+try map.ensureUnusedCapacity(allocator, 10);
 
 const cap = map.capacity();
 const len = map.count();
 
 map.clearRetainingCapacity();
-map.clearAndFree();
+map.clearAndFree(allocator);
 ```
 
 ## String Keys
 
 ```zig
-var map = std.StringArrayHashMap(i32).init(allocator);
-defer map.deinit();
+var map: std.array_hash_map.String(i32) = .empty;
+defer map.deinit(allocator);
 
-try map.put("apple", 1);
-try map.put("banana", 2);
+try map.put(allocator, "apple", 1);
+try map.put(allocator, "banana", 2);
 
 // Keys are stored by reference, not copied
 // Make sure string lifetime exceeds map usage
@@ -151,16 +152,16 @@ const CaseInsensitiveContext = struct {
     }
 };
 
-var map = std.ArrayHashMap(
+var map: std.array_hash_map.Custom(
     []const u8,
     i32,
     CaseInsensitiveContext,
     true,  // store_hash for better performance
-).initContext(allocator, .{});
-defer map.deinit();
+) = .empty;
+defer map.deinit(allocator);
 
-try map.put("Hello", 1);
-_ = map.get("HELLO");  // finds it!
+try map.put(allocator, "Hello", 1);
+_ = map.get("HELLO");  // finds it! (CaseInsensitiveContext is zero-sized, so no *Context calls needed)
 ```
 
 ## Complete Example: Word Counter
@@ -171,14 +172,15 @@ const std = @import("std");
 pub fn main() !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
-    var counts = std.StringArrayHashMap(u32).init(gpa.allocator());
-    defer counts.deinit();
+    var counts: std.array_hash_map.String(u32) = .empty;
+    defer counts.deinit(allocator);
 
     const words = [_][]const u8{ "apple", "banana", "apple", "cherry", "banana", "apple" };
 
     for (words) |word| {
-        const result = try counts.getOrPut(word);
+        const result = try counts.getOrPut(allocator, word);
         if (result.found_existing) {
             result.value_ptr.* += 1;
         } else {
@@ -213,8 +215,8 @@ pub fn main() !void {
 ## Notes
 
 - Iteration order equals insertion order
-- `swapRemove` is O(1) but changes order
-- `orderedRemove` preserves order but is O(n)
+- `swapRemove`/`orderedRemove` return `bool` (whether something was removed), not the removed value — use `fetchSwapRemove` for that
 - Use `store_hash=true` when `eql` is expensive
-- Keys/values are stored in `MultiArrayList` (cache-friendly)
+- Keys/values are stored in a `MultiArrayList`-like layout (cache-friendly)
 - Pointer stability only guaranteed with pre-allocated capacity
+- There is no managed (self-storing-the-allocator) variant in 0.16 — always pass `gpa` explicitly to mutating methods

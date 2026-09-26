@@ -220,7 +220,8 @@ random.bytes(&buffer);
 // Generate a random string
 var id: [16]u8 = undefined;
 random.bytes(&id);
-const hex = std.fmt.fmtSliceHexLower(&id);
+// 0.16: std.fmt.fmtSliceHexLower is gone — "{x}" on a byte slice already prints lowercase hex directly
+std.debug.print("{x}\n", .{id});
 ```
 
 ## Collections

@@ -437,7 +437,7 @@ fn hashPair(comptime T: type, a: T, b: T) u64 {
 
 ```zig
 fn checksumFile(path: []const u8) !u32 {
-    const file = try std.fs.cwd().openFile(path, .{});
+    const file = try std.Io.Dir.cwd().openFile(path, .{});
     defer file.close();
 
     var crc = std.hash.Crc32.init();

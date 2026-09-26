@@ -118,13 +118,13 @@ fn myLogFn(
     const level_txt = comptime level.asText();
     const prefix = "[" ++ level_txt ++ "] (" ++ scope_prefix ++ "): ";
 
-    std.debug.lockStdErr();
-    defer std.debug.unlockStdErr();
-
+    // 0.16: lockStdErr/unlockStdErr never existed — it's lockStderr/unlockStderr, and it needs a buffer
     var buf: [64]u8 = undefined;
-    const stderr = std.fs.File.stderr().writer(&buf);
-    nosuspend stderr.print(prefix ++ format ++ "\n", args) catch return;
-    try stderr.flush();
+    const held = std.debug.lockStderr(&buf);
+    defer std.debug.unlockStderr();
+
+    nosuspend held.file_writer.interface.print(prefix ++ format ++ "\n", args) catch return;
+    held.file_writer.interface.flush() catch return;
 }
 ```
 
@@ -172,8 +172,12 @@ fn myLogFn(
     comptime format: []const u8,
     args: anytype,
 ) void {
-    // Add timestamp, then forward to default
-    std.debug.print("[{d}] ", .{std.time.timestamp()});
+    // Add timestamp, then forward to default.
+    // 0.16: std.time.timestamp() is gone, and a log function's fixed signature has no `io`
+    // to use std.Io.Clock — fall back to std.c.clock_gettime (see std-time.md).
+    var ts: std.c.timespec = undefined;
+    _ = std.c.clock_gettime(.REALTIME, &ts);
+    std.debug.print("[{d}] ", .{ts.sec});
     std.log.defaultLog(level, scope, format, args);
 }
 ```
@@ -211,7 +215,7 @@ fn processItem(item: Item) void {
 
 ```zig
 fn loadConfig(path: []const u8) !Config {
-    return std.fs.cwd().openFile(path, .{}) catch |err| {
+    return std.Io.Dir.cwd().openFile(path, .{}) catch |err| {
         log.err("Failed to open config '{s}': {s}", .{path, @errorName(err)});
         return err;
     };
@@ -237,12 +241,12 @@ fn fileLogFn(
     comptime format: []const u8,
     args: anytype,
 ) void {
-    const file = std.fs.cwd().openFile("app.log", .{ .mode = .write_only }) catch return;
+    const file = std.Io.Dir.cwd().openFile("app.log", .{ .mode = .write_only }) catch return;
     defer file.close();
     file.seekFromEnd(0) catch return;
 
     var buf: [256]u8 = undefined;
-    var writer = file.writer(&buf);
+    var writer = file.writer(io, &buf);
     const w = &writer.interface;
 
     const level_txt = comptime level.asText();

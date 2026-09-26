@@ -224,7 +224,7 @@ try stdout.print("Hello\n", .{});
 
 // CORRECT - new API with buffer and flush
 var buf: [4096]u8 = undefined;
-var stdout_writer = std.fs.File.stdout().writer(&buf);
+var stdout_writer = std.Io.File.stdout().writer(io, &buf);
 const stdout = &stdout_writer.interface;
 try stdout.print("Hello\n", .{});
 try stdout.flush();  // REQUIRED!
@@ -424,8 +424,9 @@ fn parseColor(byte: u8) Color {
 }
 
 // CORRECT - validate range
+// 0.16: std.meta.intToEnum is gone — std.enums.fromInt already returns an optional
 fn parseColor(byte: u8) ?Color {
-    return std.meta.intToEnum(Color, byte) catch null;
+    return std.enums.fromInt(Color, byte);
 }
 ```
 
@@ -603,7 +604,7 @@ state.bytes.appendSliceAssumeCapacity(data);
 **Anti-pattern:**
 ```zig
 var buf: [4096]u8 = undefined;
-var writer = file.writer(&buf);
+var writer = file.writer(io, &buf);
 try writer.interface.print("data", .{});
 // Missing flush - data may be lost!
 ```
@@ -611,7 +612,7 @@ try writer.interface.print("data", .{});
 **Correct pattern:**
 ```zig
 var buf: [4096]u8 = undefined;
-var writer = file.writer(&buf);
+var writer = file.writer(io, &buf);
 try writer.interface.print("data", .{});
 try writer.interface.flush();  // Required!
 ```
@@ -734,7 +735,7 @@ fn getSymbol(index: SymbolIndex) *Symbol { ... }
 **Anti-pattern: Blind try propagation**
 ```zig
 fn processFile(path: []const u8) !Data {
-    const file = try std.fs.cwd().openFile(path, .{});  // Which error occurred?
+    const file = try std.Io.Dir.cwd().openFile(path, .{});  // Which error occurred?
     defer file.close();
     const data = try file.readToEndAlloc(allocator, max_size);
     return parseData(data);
@@ -745,7 +746,7 @@ fn processFile(path: []const u8) !Data {
 **Correct pattern: Specific error handling when needed**
 ```zig
 fn processFile(path: []const u8) !Data {
-    const file = std.fs.cwd().openFile(path, .{}) catch |err| switch (err) {
+    const file = std.Io.Dir.cwd().openFile(path, .{}) catch |err| switch (err) {
         error.FileNotFound => return error.ConfigNotFound,  // Meaningful error
         else => |e| return e,
     };

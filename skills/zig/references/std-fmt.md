@@ -348,7 +348,7 @@ const Point = struct {
     x: f32,
     y: f32,
 
-    pub fn format(self: @This(), writer: *std.io.Writer) std.io.Writer.Error!void {
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.print("({d:.2}, {d:.2})", .{ self.x, self.y });
     }
 };
@@ -364,7 +364,7 @@ Create a type that wraps data with a custom format function.
 ```zig
 const std = @import("std");
 
-fn formatReversed(data: []const u8, writer: *std.io.Writer) std.io.Writer.Error!void {
+fn formatReversed(data: []const u8, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     var i = data.len;
     while (i > 0) {
         i -= 1;
@@ -388,7 +388,7 @@ Call alternate format methods by name.
 const Example = struct {
     number: u8,
 
-    pub fn asHex(self: @This(), writer: *std.io.Writer) std.io.Writer.Error!void {
+    pub fn asHex(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.print("0x{x:0>2}", .{self.number});
     }
 };

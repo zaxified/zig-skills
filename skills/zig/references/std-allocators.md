@@ -334,19 +334,15 @@ var pool = std.heap.MemoryPoolAligned(T, .@"64").init(allocator);
 var pool = try std.heap.MemoryPoolExtra(T, .{ .growable = false }).initPreheated(allocator, 50);
 ```
 
-### ThreadSafeAllocator
+### ThreadSafeAllocator → SmpAllocator (0.16)
 
-Wraps any allocator with mutex for thread safety:
+**Removed in 0.16:** `std.heap.ThreadSafeAllocator` (a generic mutex-wrapper around any other allocator) is gone. In its place, 0.16 adds `std.heap.SmpAllocator` (`std.heap.smp_allocator`): a scalable, thread-safe global allocator with its own per-thread freelists — not a wrapper around another allocator, so there is nothing to wrap; use it directly:
 
 ```zig
-var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-defer arena.deinit();
-
-var ts = std.heap.ThreadSafeAllocator{
-    .child_allocator = arena.allocator(),
-};
-const allocator = ts.allocator();  // Safe to use from multiple threads
+const allocator = std.heap.smp_allocator;  // singleton, ready to use from multiple threads
 ```
+
+If you specifically need to make an *arbitrary* existing allocator thread-safe (not `smp_allocator` itself), you now have to write that mutex wrapper yourself (a single `Allocator.VTable` wrapping `std.Io.Mutex`/a pthread shim); there is no longer a std type for it.
 
 ### StackFallbackAllocator
 
@@ -365,15 +361,14 @@ const large = try allocator.alloc(u8, 10000);
 
 ### raw_c_allocator
 
-Direct malloc/free without alignment overhead. Use as `ArenaAllocator` backing when linking libc:
+**Removed in 0.16:** `std.heap.raw_c_allocator` is gone — only `std.heap.c_allocator` remains, and it now handles the full `Allocator` interface (including arbitrary alignment) itself:
 
 ```zig
-// More efficient than c_allocator when wrapping with ArenaAllocator
-var arena = std.heap.ArenaAllocator.init(std.heap.raw_c_allocator);
+var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
 defer arena.deinit();
 ```
 
-Requires linking libc. Does not support custom alignment - asserts alignment <= `@alignOf(std.c.max_align_t)`.
+Requires linking libc.
 
 ### Wasm Allocator
 

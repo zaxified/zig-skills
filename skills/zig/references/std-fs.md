@@ -1,6 +1,8 @@
-# std.fs - File System API Reference
+# std.fs - File System API Reference (0.16)
 
-File system operations in Zig 0.15.x. Covers files, directories, iteration, atomic writes, and paths.
+File system operations in Zig 0.16. Covers files, directories, iteration, atomic writes, and paths.
+
+**0.16 change:** almost everything that used to live under `std.fs` moved to `std.Io.Dir` / `std.Io.File`, and nearly every method now takes an `io: Io` argument (obtained from an `Io` implementation, e.g. `var threaded: std.Io.Threaded = .init(gpa, .{}); const io = threaded.io();`), because the actual read/write/open syscalls go through it. Only `std.fs.path` (pure path-string manipulation, no I/O) is unchanged.
 
 ## Table of Contents
 - [Module Structure](#module-structure)
@@ -14,11 +16,11 @@ File system operations in Zig 0.15.x. Covers files, directories, iteration, atom
 ## Module Structure
 
 ```zig
-std.fs.File      // File handle and I/O operations
-std.fs.Dir       // Directory handle and operations
-std.fs.AtomicFile // Safe file writes with atomic rename
-std.fs.path      // Path manipulation utilities
-std.fs.cwd()     // Current working directory handle
+std.Io.File      // File handle and I/O operations (was std.fs.File)
+std.Io.Dir       // Directory handle and operations (was std.fs.Dir)
+std.Io.File.Atomic // Safe file writes with atomic rename/replace (was std.fs.AtomicFile)
+std.fs.path      // Path manipulation utilities (unchanged, pure functions)
+std.Io.Dir.cwd() // Current working directory handle (was std.fs.cwd())
 ```
 
 ## Working with Files
@@ -27,42 +29,42 @@ std.fs.cwd()     // Current working directory handle
 
 ```zig
 // Open existing file for reading
-const file = try std.fs.cwd().openFile("data.txt", .{});
-defer file.close();
+const file = try std.Io.Dir.cwd().openFile(io, "data.txt", .{});
+defer file.close(io);
 
 // Open with write access
-const file = try std.fs.cwd().openFile("data.txt", .{ .mode = .read_write });
+const file = try std.Io.Dir.cwd().openFile(io, "data.txt", .{ .mode = .read_write });
 
 // Create or truncate file
-const file = try std.fs.cwd().createFile("output.txt", .{});
-defer file.close();
+const file = try std.Io.Dir.cwd().createFile(io, "output.txt", .{});
+defer file.close(io);
 
 // Create without truncating existing
-const file = try std.fs.cwd().createFile("output.txt", .{ .truncate = false });
+const file = try std.Io.Dir.cwd().createFile(io, "output.txt", .{ .truncate = false });
 
 // Create exclusively (fail if exists)
-const file = try std.fs.cwd().createFile("new.txt", .{ .exclusive = true });
+const file = try std.Io.Dir.cwd().createFile(io, "new.txt", .{ .exclusive = true });
 ```
 
-**OpenFlags**:
+**OpenFlags** (`Dir.OpenFileOptions`):
 - `.mode`: `.read_only` (default), `.write_only`, `.read_write`
 - `.lock`: `.none`, `.shared`, `.exclusive` (advisory locking)
 - `.lock_nonblocking`: return `error.WouldBlock` instead of waiting
 
-**CreateFlags**:
+**CreateFlags** (`Dir.CreateFileOptions`):
 - `.read`: enable read access (default: false)
 - `.truncate`: truncate if exists (default: true)
 - `.exclusive`: fail if exists (default: false)
-- `.mode`: POSIX file mode (default: 0o666)
+- `.mode`: POSIX mode (default: 0o666)
 
-### Reading Files (0.15.x)
+### Reading Files
 
 ```zig
-const file = try std.fs.cwd().openFile("data.txt", .{});
-defer file.close();
+const file = try std.Io.Dir.cwd().openFile(io, "data.txt", .{});
+defer file.close(io);
 
 var buf: [4096]u8 = undefined;
-var reader = file.reader(&buf);
+var reader = file.reader(io, &buf);
 
 // Read lines
 while (reader.interface.takeDelimiterExclusive('\n')) |line| {
@@ -72,19 +74,19 @@ while (reader.interface.takeDelimiterExclusive('\n')) |line| {
     else => return err,
 }
 
-// Read all into buffer
-const content = try reader.interface.readAllAlloc(allocator, max_size);
+// Read all into buffer (limit is `Io.Limit`, not a bare `usize`)
+const content = try reader.interface.allocRemaining(allocator, .limited(max_size));
 defer allocator.free(content);
 ```
 
-### Writing Files (0.15.x)
+### Writing Files
 
 ```zig
-const file = try std.fs.cwd().createFile("output.txt", .{});
-defer file.close();
+const file = try std.Io.Dir.cwd().createFile(io, "output.txt", .{});
+defer file.close(io);
 
 var buf: [4096]u8 = undefined;
-var writer = file.writer(&buf);
+var writer = file.writer(io, &buf);
 const w = &writer.interface;
 
 try w.print("Line {d}\n", .{42});
@@ -95,16 +97,16 @@ try w.flush();  // REQUIRED - flushes buffer to file
 ### Convenience Methods
 
 ```zig
-// Read entire file into buffer
+// Read entire file into a caller-provided buffer
 var buffer: [4096]u8 = undefined;
-const content = try std.fs.cwd().readFile("data.txt", &buffer);
+const content = try std.Io.Dir.cwd().readFile(io, "data.txt", &buffer);
 
-// Read with allocation
-const content = try std.fs.cwd().readFileAlloc(allocator, "data.txt", max_size);
+// Read with allocation (limit is `Io.Limit`)
+const content = try std.Io.Dir.cwd().readFileAlloc(io, "data.txt", allocator, .limited(max_size));
 defer allocator.free(content);
 
 // Write entire contents
-try std.fs.cwd().writeFile(.{
+try std.Io.Dir.cwd().writeFile(io, .{
     .sub_path = "output.txt",
     .data = "Hello, World!",
 });
@@ -113,40 +115,44 @@ try std.fs.cwd().writeFile(.{
 ### File Metadata
 
 ```zig
-const stat = try file.stat();
+const stat = try file.stat(io);
 stat.size;      // u64 - file size in bytes
 stat.kind;      // .file, .directory, .sym_link, etc.
-stat.mode;      // POSIX mode (0 on Windows)
-stat.mtime;     // i128 - modification time in nanoseconds since Unix epoch
-stat.atime;     // i128 - access time
-stat.ctime;     // i128 - status change time
+stat.mtime;     // Io.Timestamp - modification time
+stat.atime;     // Io.Timestamp - access time
+stat.ctime;     // Io.Timestamp - status change time
 stat.inode;     // file system inode number
 
-// Get file size
-const size = try file.getEndPos();
-
 // Check if terminal
-if (file.isTty()) { ... }
+if (try file.isTty(io)) { ... }
 ```
+
+**Note (0.16):** `file.getEndPos()` is gone — use `stat.size`. `stat.mode` is gone from the cross-platform `Stat`; use `stat.permissions` (`File.Permissions`).
 
 ### Seeking
 
+**Note (0.16):** `File` itself has no `seekTo`/`seekBy`/`getPos` anymore — those live on the buffered `File.Reader` / `File.Writer` you get from `file.reader(io, buf)` / `file.writer(io, buf)`:
+
 ```zig
-try file.seekTo(0);              // absolute position
-try file.seekBy(-100);           // relative to current
-try file.seekFromEnd(-100);      // relative to end
-const pos = try file.getPos();   // get current position
+var buf: [4096]u8 = undefined;
+var reader = file.reader(io, &buf);
+
+try reader.seekTo(0);             // absolute position
+try reader.seekBy(-100);          // relative to current
+const pos = reader.logicalPos();  // current logical position
 ```
+
+For direct random access without a stream, use `file.readPositional(io, buffers, offset)` / `file.writePositional(io, buffers, offset)`, which take an explicit byte offset per call.
 
 ### Standard I/O
 
 ```zig
-const stdin = std.fs.File.stdin();
-const stdout = std.fs.File.stdout();
-const stderr = std.fs.File.stderr();
+const stdin = std.Io.File.stdin();
+const stdout = std.Io.File.stdout();
+const stderr = std.Io.File.stderr();
 
 var buf: [4096]u8 = undefined;
-var writer = stdout.writer(&buf);
+var writer = stdout.writer(io, &buf);
 try writer.interface.print("Hello\n", .{});
 try writer.interface.flush();
 ```
@@ -157,63 +163,59 @@ try writer.interface.flush();
 
 ```zig
 // Open for file operations (default)
-var dir = try std.fs.cwd().openDir("subdir", .{});
-defer dir.close();
+var dir = try std.Io.Dir.cwd().openDir(io, "subdir", .{});
+defer dir.close(io);
 
 // Open for iteration
-var dir = try std.fs.cwd().openDir("subdir", .{ .iterate = true });
-defer dir.close();
-
-// Don't follow symlinks
-var dir = try std.fs.cwd().openDir("link", .{ .no_follow = true });
+var dir = try std.Io.Dir.cwd().openDir(io, "subdir", .{ .iterate = true });
+defer dir.close(io);
 ```
 
 **OpenOptions**:
 - `.access_sub_paths`: can use as base for file ops (default: true)
 - `.iterate`: can iterate contents (default: false)
-- `.no_follow`: don't follow symlinks (default: false)
 
 ### Creating Directories
 
 ```zig
-// Create single directory
-try std.fs.cwd().makeDir("new_dir");
+// Create single directory (was makeDir)
+try std.Io.Dir.cwd().createDir(io, "new_dir", .default_dir);
 
-// Create with all parents
-try std.fs.cwd().makePath("path/to/nested/dir");
+// Create with all parents (was makePath)
+try std.Io.Dir.cwd().createDirPath(io, "path/to/nested/dir");
 
-// Create and open
-var dir = try std.fs.cwd().makeOpenPath("path/to/dir", .{});
-defer dir.close();
+// Create and open (was makeOpenPath)
+var dir = try std.Io.Dir.cwd().createDirPathOpen(io, "path/to/dir", .{});
+defer dir.close(io);
 ```
 
 ### Deleting
 
 ```zig
 // Delete file
-try dir.deleteFile("file.txt");
+try dir.deleteFile(io, "file.txt");
 
 // Delete empty directory
-try dir.deleteDir("empty_dir");
+try dir.deleteDir(io, "empty_dir");
 
 // Delete recursively (files and subdirs)
-try dir.deleteTree("dir_with_contents");
+try dir.deleteTree(io, "dir_with_contents");
 ```
 
 ### Renaming and Copying
 
 ```zig
 // Rename within same directory
-try dir.rename("old.txt", "new.txt");
+try dir.rename(io, "old.txt", "new.txt");
 
-// Rename across directories
-try std.fs.rename(old_dir, "file.txt", new_dir, "file.txt");
+// Rename across directories — Dir.rename(old_dir, old_sub_path, new_dir, new_sub_path, io)
+try std.Io.Dir.rename(old_dir, "file.txt", new_dir, "file.txt", io);
 
-// Copy file atomically
-try std.fs.Dir.copyFile(src_dir, "source.txt", dest_dir, "dest.txt", .{});
+// Copy file atomically — Dir.copyFile(src_dir, src_path, dest_dir, dest_path, io, options)
+try std.Io.Dir.copyFile(src_dir, "source.txt", dest_dir, "dest.txt", io, .{});
 
-// Update only if source is newer
-const status = try std.fs.Dir.updateFile(src_dir, "src.txt", dest_dir, "dst.txt", .{});
+// Update only if source is newer — Dir.updateFile(src_dir, io, src_path, dest_dir, dest_path, options)
+const status = try std.Io.Dir.updateFile(src_dir, io, "src.txt", dest_dir, "dst.txt", .{});
 if (status == .stale) {
     // file was copied
 }
@@ -223,17 +225,17 @@ if (status == .stale) {
 
 ```zig
 // Check if accessible (TOCTOU warning!)
-dir.access("file.txt", .{}) catch |err| switch (err) {
+dir.access(io, "file.txt", .{}) catch |err| switch (err) {
     error.FileNotFound => { /* doesn't exist */ },
     else => return err,
 };
 
 // Better: just try to open and handle error
-const file = dir.openFile("file.txt", .{}) catch |err| switch (err) {
+const file = dir.openFile(io, "file.txt", .{}) catch |err| switch (err) {
     error.FileNotFound => { /* handle missing */ return; },
     else => return err,
 };
-defer file.close();
+defer file.close(io);
 ```
 
 ## Directory Iteration
@@ -241,27 +243,27 @@ defer file.close();
 ### Basic Iteration
 
 ```zig
-var dir = try std.fs.cwd().openDir(".", .{ .iterate = true });
-defer dir.close();
+var dir = try std.Io.Dir.cwd().openDir(io, ".", .{ .iterate = true });
+defer dir.close(io);
 
 var iter = dir.iterate();
-while (try iter.next()) |entry| {
+while (try iter.next(io)) |entry| {
     std.debug.print("{s} ({s})\n", .{ entry.name, @tagName(entry.kind) });
 }
 ```
 
-**Entry.Kind**: `.file`, `.directory`, `.sym_link`, `.block_device`, `.character_device`, `.named_pipe`, `.unix_domain_socket`, `.unknown`
+**Entry.Kind** (`std.Io.File.Kind`): `.file`, `.directory`, `.sym_link`, `.block_device`, `.character_device`, `.named_pipe`, `.unix_domain_socket`, `.unknown`
 
 ### Recursive Walking
 
 ```zig
-var dir = try std.fs.cwd().openDir("src", .{ .iterate = true });
-defer dir.close();
+var dir = try std.Io.Dir.cwd().openDir(io, "src", .{ .iterate = true });
+defer dir.close(io);
 
 var walker = try dir.walk(allocator);
 defer walker.deinit();
 
-while (try walker.next()) |entry| {
+while (try walker.next(io)) |entry| {
     // entry.path: full relative path "subdir/file.txt"
     // entry.basename: just filename "file.txt"
     // entry.kind: file type
@@ -273,41 +275,34 @@ while (try walker.next()) |entry| {
 }
 ```
 
-### Reset Iterator
-
-```zig
-var iter = dir.iterate();
-while (try iter.next()) |_| { }
-iter.reset();  // start over from beginning
-```
+**Note (0.16):** `iterate()`/`walk()` build the iterator without touching `io` (no syscalls yet); `io` is only needed on each `.next(io)` call. There is no `iterator.reset()` anymore — open a fresh iterator with `dir.iterate()` instead.
 
 ## Atomic File Operations
 
-Safe file writes using temporary files and atomic rename. Prevents partial writes on crash.
+Safe file writes using temporary files and atomic rename/replace. Prevents partial writes on crash. `dir.atomicFile(...)` is gone — it is now `dir.createFileAtomic(io, sub_path, options)`, returning a `std.Io.File.Atomic` (the buffer is no longer part of the options; build your own buffered writer from `atomic.file`):
 
 ```zig
+var atomic = try dir.createFileAtomic(io, "output.txt", .{ .replace = true });
+defer atomic.deinit(io);  // always call, even after link()/replace()
+
 var buf: [4096]u8 = undefined;
-var atomic = try dir.atomicFile("output.txt", .{ .write_buffer = &buf });
-defer atomic.deinit();  // always call, even after finish()
-
-const w = &atomic.file_writer.interface;
+var file_writer = atomic.file.writer(io, &buf);
+const w = &file_writer.interface;
 try w.print("Safe content\n", .{});
+try w.flush();
 
-try atomic.finish();  // flush + rename atomically
+try atomic.replace(io);  // atomically replace an existing file
+// or: try atomic.link(io);  // fail with error.PathAlreadyExists if something is already there
 ```
 
-**AtomicFileOptions**:
-- `.mode`: POSIX mode for new file
+**CreateFileAtomicOptions**:
+- `.permissions`: permissions for the new file (default: `.default_file`)
 - `.make_path`: create parent directories if missing
-- `.write_buffer`: required buffer for writer
-
-**Manual control**:
-```zig
-try atomic.flush();           // flush buffer to temp file
-try atomic.renameIntoPlace(); // atomically replace target
-```
+- `.replace`: must be `true` if you intend to call `atomic.replace()` instead of `atomic.link()`
 
 ## Path Manipulation
+
+`std.fs.path` is unchanged in 0.16 — pure string manipulation, no I/O:
 
 ```zig
 const path = std.fs.path;
@@ -340,15 +335,15 @@ const sep = path.sep;  // '/' on POSIX, '\\' on Windows
 ### Process All Files in Directory
 
 ```zig
-var dir = try std.fs.cwd().openDir("data", .{ .iterate = true });
-defer dir.close();
+var dir = try std.Io.Dir.cwd().openDir(io, "data", .{ .iterate = true });
+defer dir.close(io);
 
 var iter = dir.iterate();
-while (try iter.next()) |entry| {
+while (try iter.next(io)) |entry| {
     if (entry.kind != .file) continue;
 
-    var file = try dir.openFile(entry.name, .{});
-    defer file.close();
+    var file = try dir.openFile(io, entry.name, .{});
+    defer file.close(io);
     // process file...
 }
 ```
@@ -356,21 +351,23 @@ while (try iter.next()) |entry| {
 ### Safe Config File Update
 
 ```zig
-fn saveConfig(dir: std.fs.Dir, config: Config) !void {
-    var buf: [4096]u8 = undefined;
-    var atomic = try dir.atomicFile("config.json", .{ .write_buffer = &buf });
-    defer atomic.deinit();
+fn saveConfig(io: std.Io, dir: std.Io.Dir, config: Config) !void {
+    var atomic = try dir.createFileAtomic(io, "config.json", .{ .replace = true });
+    defer atomic.deinit(io);
 
-    const w = &atomic.file_writer.interface;
-    try std.json.stringify(config, .{}, w);
-    try atomic.finish();
+    var buf: [4096]u8 = undefined;
+    var file_writer = atomic.file.writer(io, &buf);
+    const w = &file_writer.interface;
+    try std.json.Stringify.value(config, .{}, w);
+    try w.flush();
+    try atomic.replace(io);
 }
 ```
 
 ### Find Files Recursively
 
 ```zig
-fn findFiles(allocator: Allocator, dir: std.fs.Dir, extension: []const u8) ![][]const u8 {
+fn findFiles(io: std.Io, allocator: Allocator, dir: std.Io.Dir, extension: []const u8) ![][]const u8 {
     var results: std.ArrayList([]const u8) = .empty;
     errdefer {
         for (results.items) |s| allocator.free(s);
@@ -380,7 +377,7 @@ fn findFiles(allocator: Allocator, dir: std.fs.Dir, extension: []const u8) ![][]
     var walker = try dir.walk(allocator);
     defer walker.deinit();
 
-    while (try walker.next()) |entry| {
+    while (try walker.next(io)) |entry| {
         if (entry.kind == .file and std.mem.endsWith(u8, entry.basename, extension)) {
             const copy = try allocator.dupe(u8, entry.path);
             try results.append(allocator, copy);
@@ -393,18 +390,18 @@ fn findFiles(allocator: Allocator, dir: std.fs.Dir, extension: []const u8) ![][]
 ### Copy Directory Tree
 
 ```zig
-fn copyTree(allocator: Allocator, src: std.fs.Dir, dest: std.fs.Dir) !void {
+fn copyTree(io: std.Io, allocator: Allocator, src: std.Io.Dir, dest: std.Io.Dir) !void {
     var walker = try src.walk(allocator);
     defer walker.deinit();
 
-    while (try walker.next()) |entry| {
+    while (try walker.next(io)) |entry| {
         if (entry.kind == .directory) {
-            try dest.makePath(entry.path);
+            try dest.createDirPath(io, entry.path);
         } else if (entry.kind == .file) {
             if (std.fs.path.dirname(entry.path)) |parent| {
-                try dest.makePath(parent);
+                try dest.createDirPath(io, parent);
             }
-            try std.fs.Dir.copyFile(entry.dir, entry.basename, dest, entry.path, .{});
+            try std.Io.Dir.copyFile(entry.dir, entry.basename, dest, entry.path, io, .{});
         }
     }
 }
@@ -414,7 +411,7 @@ fn copyTree(allocator: Allocator, src: std.fs.Dir, dest: std.fs.Dir) !void {
 
 ```zig
 // Read existing content
-const content = try dir.readFileAlloc(allocator, "data.txt", max_size);
+const content = try dir.readFileAlloc(io, "data.txt", allocator, .limited(max_size));
 defer allocator.free(content);
 
 // Modify
@@ -422,9 +419,11 @@ const modified = try process(allocator, content);
 defer allocator.free(modified);
 
 // Write back atomically
+var atomic = try dir.createFileAtomic(io, "data.txt", .{ .replace = true });
+defer atomic.deinit(io);
 var buf: [4096]u8 = undefined;
-var atomic = try dir.atomicFile("data.txt", .{ .write_buffer = &buf });
-defer atomic.deinit();
-try atomic.file_writer.interface.writeAll(modified);
-try atomic.finish();
+var file_writer = atomic.file.writer(io, &buf);
+try file_writer.interface.writeAll(modified);
+try file_writer.interface.flush();
+try atomic.replace(io);
 ```

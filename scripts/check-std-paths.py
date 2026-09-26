@@ -50,6 +50,27 @@ def usable_lines(block):
             yield line
 
 
+# In 0.16 std.Io.File and std.Io.net.Stream take the Io instance first:
+# file.reader(io, &buf). A one-argument call is the 0.15 form. The HTTP
+# client's response.reader(&buf) really takes one argument.
+ONE_ARG_RW = re.compile(r"\b(?!response\b|resp\b|req\b|request\b)[\w\])]+(?:\(\))?\.(reader|writer)\(\s*&?\w+(?:\[[^\]]*\])?\s*\)")
+
+
+def arity_findings():
+    out = []
+    for f in sorted(glob.glob(os.path.join(SKILL, "**", "*.md"), recursive=True)):
+        text = open(f, encoding="utf-8").read()
+        for m in BLOCK.finditer(text):
+            before = text[max(0, text.rfind("\n", 0, m.start() - 1) - 300) : m.start()]
+            if BAD_MARK.search(before.splitlines()[-1] if before.splitlines() else ""):
+                continue
+            line0 = text.count("\n", 0, m.start()) + 2
+            for line in usable_lines(m.group(1)):
+                if ONE_ARG_RW.search(line.split("//")[0]):
+                    out.append(f"{os.path.relpath(f, ROOT)}:{line0}: 0.15-style one-argument reader/writer: {line.strip()[:80]}")
+    return out
+
+
 def collect():
     found = {}  # path -> first "file:line"
     for f in sorted(glob.glob(os.path.join(SKILL, "**", "*.md"), recursive=True)):
@@ -145,8 +166,11 @@ def main():
     other = [l for l in r.stderr.splitlines() if "error:" in l and "missing: std." not in l]
     for l in other:
         print(l, file=sys.stderr)
-    print(f"{len(found)} paths checked, {len(missing)} missing, {len(other)} other errors", file=sys.stderr)
-    return 1 if missing or other else 0
+    arity = arity_findings()
+    for a in arity:
+        print(a)
+    print(f"{len(found)} paths checked, {len(missing)} missing, {len(other)} other errors, {len(arity)} arity", file=sys.stderr)
+    return 1 if missing or other or arity else 0
 
 
 if __name__ == "__main__":

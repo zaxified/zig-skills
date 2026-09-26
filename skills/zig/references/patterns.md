@@ -99,11 +99,11 @@ defer allocator.free(copy);
 
 #### Reading Files
 ```zig
-const file = try std.fs.cwd().openFile("data.txt", .{});
+const file = try std.Io.Dir.cwd().openFile("data.txt", .{});
 defer file.close();
 
 var buf: [4096]u8 = undefined;
-var reader = file.reader(&buf);
+var reader = file.reader(io, &buf);
 const r = &reader.interface;
 
 // Line by line (takeDelimiter returns null at EOF)
@@ -114,11 +114,11 @@ while (try r.takeDelimiter('\n')) |line| {
 
 #### Writing Files
 ```zig
-const file = try std.fs.cwd().createFile("out.txt", .{});
+const file = try std.Io.Dir.cwd().createFile("out.txt", .{});
 defer file.close();
 
 var buf: [4096]u8 = undefined;
-var writer = file.writer(&buf);
+var writer = file.writer(io, &buf);
 const w = &writer.interface;
 
 try w.print("Hello {s}\n", .{"world"});
@@ -128,7 +128,7 @@ try w.flush();
 #### Stdout/Stderr
 ```zig
 var stdout_buf: [4096]u8 = undefined;
-var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
 const stdout = &stdout_writer.interface;
 
 try stdout.print("Output\n", .{});
@@ -190,7 +190,7 @@ const config = parsed.value;
 
 #### Stringifying
 ```zig
-const json = try std.json.stringifyAlloc(allocator, config, .{});
+const json = try std.json.Stringify.valueAlloc(allocator, config, .{});
 defer allocator.free(json);
 ```
 

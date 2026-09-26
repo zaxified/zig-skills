@@ -5,9 +5,9 @@ skills/zig/references/builtins.md	advice	1a7413e06cf6d13f	Reference entry for th
 skills/zig/references/code-review.md	advice	98a79d36f6b87c32	Review checklist row telling the reviewer to search for and flag this call.
 skills/zig/references/code-review.md	advice	586d250f2e68d74a	Shown inside the review guide as the pattern to flag, with its cost spelled out.
 skills/zig/references/c-interop.md	url	16359dcd812bff64	Apple plist DOCTYPE identifier inside a heredoc; an XML public identifier, never fetched.
-skills/zig/references/std-fs.md	command	9ad74e53439e2782	std.fs API reference; relative name inside a Dir the caller opened.
-skills/zig/references/std-fs.md	command	9218123ed0f27d87	std.fs API reference; relative name inside a Dir the caller opened.
-skills/zig/references/std-fs.md	command	ee7a63a8188ac1e7	std.fs API reference; relative name inside a Dir the caller opened.
-skills/zig/references/std-net.md	command	49cd15fbd68e5f09	Removes the example's own Unix socket file in /tmp on exit.
+skills/zig/references/std-fs.md	command	b422f2d1c92aca07	std.Io.Dir API reference; relative name inside a Dir the caller opened.
+skills/zig/references/std-fs.md	command	0842708a44a7aef2	std.Io.Dir API reference; relative name inside a Dir the caller opened.
+skills/zig/references/std-fs.md	command	9706eb33cd74dde1	std.Io.Dir API reference; relative name inside a Dir the caller opened.
+skills/zig/references/std-net.md	command	8f5e905577d53ecb	Removes the example's own Unix socket file in /tmp on exit.
 skills/zig/references/std-process.md	command	c1a1e657a3c6c019	Reading world-readable /etc/passwd to look up a uid; no write, no credentials.
 README.md	command	7d6b31a6207ce06d	Human install instructions naming a repository skills directory as the install target; no command writes there.

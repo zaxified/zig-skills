@@ -28,7 +28,7 @@ pub fn analyzeSource(allocator: std.mem.Allocator, source: [:0]const u8) !void {
     if (tree.errors.len > 0) {
         for (tree.errors) |err| {
             var buf: [256]u8 = undefined;
-            var w: std.io.Writer = .fixed(&buf);
+            var w: std.Io.Writer = .fixed(&buf);
             try tree.renderError(err, &w);
             std.debug.print("Error: {s}\n", .{w.buffered()});
         }
@@ -160,7 +160,7 @@ defer allocator.free(formatted);
 
 // Or render to writer
 var buf: [8192]u8 = undefined;
-var writer = std.fs.File.stdout().writer(&buf);
+var writer = std.Io.File.stdout().writer(io, &buf);
 try tree.render(allocator, &writer.interface, .{});
 try writer.interface.flush();
 ```
@@ -495,7 +495,7 @@ if (tree.errors.len > 0) {
 
         // Format error message
         var buf: [512]u8 = undefined;
-        var w: std.io.Writer = .fixed(&buf);
+        var w: std.Io.Writer = .fixed(&buf);
         try tree.renderError(err, &w);
 
         std.debug.print("{s}:{d}:{d}: error: {s}\n", .{
@@ -574,7 +574,7 @@ switch (result) {
 ```zig
 // Format identifier, escaping if needed
 var buf: [256]u8 = undefined;
-var w: std.io.Writer = .fixed(&buf);
+var w: std.Io.Writer = .fixed(&buf);
 try w.print("{f}", .{std.zig.fmtId("while")});   // @"while"
 try w.print("{f}", .{std.zig.fmtId("hello")});   // hello
 try w.print("{f}", .{std.zig.fmtId("123abc")});  // @"123abc"
@@ -592,7 +592,7 @@ std.zig.isValidId("a b")    // false (contains space)
 ```zig
 // Escape string for Zig string literal
 var buf: [256]u8 = undefined;
-var w: std.io.Writer = .fixed(&buf);
+var w: std.Io.Writer = .fixed(&buf);
 try w.print("\"{f}\"", .{std.zig.fmtString("hello\nworld")});
 // Output: "hello\nworld"
 
@@ -624,10 +624,10 @@ if (std.zig.srcHashEql(hash1, hash2)) {
 ### Read Source File
 ```zig
 // Read and decode source file (handles UTF-16LE BOM)
-const file = try std.fs.cwd().openFile("source.zig", .{});
+const file = try std.Io.Dir.cwd().openFile("source.zig", .{});
 defer file.close();
 
-var reader = file.reader(&buf);
+var reader = file.reader(io, &buf);
 const source = try std.zig.readSourceFileToEndAlloc(allocator, &reader);
 defer allocator.free(source);
 ```

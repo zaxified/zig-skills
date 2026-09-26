@@ -393,7 +393,7 @@ const Config = struct {
 };
 
 fn loadConfig(allocator: std.mem.Allocator, path: []const u8) !Config {
-    const file = std.fs.cwd().openFile(path, .{}) catch |err| switch (err) {
+    const file = std.Io.Dir.cwd().openFile(path, .{}) catch |err| switch (err) {
         error.FileNotFound => return Config{},
         else => return err,
     };
@@ -424,7 +424,7 @@ fn saveConfig(allocator: std.mem.Allocator, config: Config, path: []const u8) !v
 
     try std.zon.stringify.serialize(config, .{ .whitespace = true }, &aw.writer);
 
-    const file = try std.fs.cwd().createFile(path, .{});
+    const file = try std.Io.Dir.cwd().createFile(path, .{});
     defer file.close();
 
     try file.writeAll(aw.written());

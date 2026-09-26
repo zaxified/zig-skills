@@ -397,7 +397,7 @@ fn typeFromName(name: []const u8) type { ... }
 
 ```zig
 // NOT POSSIBLE
-const config = comptime std.fs.cwd().readFile("config.json");
+const config = comptime std.Io.Dir.cwd().readFile("config.json");
 
 // Alternatives:
 const config = @embedFile("config.json");  // Static embedding

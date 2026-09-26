@@ -29,11 +29,11 @@ std.zip.CompressionMethod  // .store, .deflate
 Extract all files from a ZIP archive to a directory:
 
 ```zig
-const file = try std.fs.cwd().openFile("archive.zip", .{});
+const file = try std.Io.Dir.cwd().openFile("archive.zip", .{});
 defer file.close();
 
 var buf: [4096]u8 = undefined;
-var file_reader = file.reader(&buf);
+var file_reader = file.reader(io, &buf);
 
 try std.zip.extract(output_dir, &file_reader, .{});
 ```
@@ -72,11 +72,11 @@ pub const ExtractOptions = struct {
 For more control, iterate over entries individually:
 
 ```zig
-const file = try std.fs.cwd().openFile("archive.zip", .{});
+const file = try std.Io.Dir.cwd().openFile("archive.zip", .{});
 defer file.close();
 
 var buf: [4096]u8 = undefined;
-var file_reader = file.reader(&buf);
+var file_reader = file.reader(io, &buf);
 
 var iter = try std.zip.Iterator.init(&file_reader);
 
@@ -231,13 +231,13 @@ std.zip.end_locator64_sig        // "PK\x06\x07"
 
 ```zig
 fn extractZip(allocator: Allocator, zip_path: []const u8, dest_path: []const u8) !void {
-    const file = try std.fs.cwd().openFile(zip_path, .{});
+    const file = try std.Io.Dir.cwd().openFile(zip_path, .{});
     defer file.close();
 
     var buf: [4096]u8 = undefined;
-    var file_reader = file.reader(&buf);
+    var file_reader = file.reader(io, &buf);
 
-    var dest = try std.fs.cwd().makeOpenPath(dest_path, .{});
+    var dest = try std.Io.Dir.cwd().makeOpenPath(dest_path, .{});
     defer dest.close();
 
     var diagnostics: std.zip.Diagnostics = .{ .allocator = allocator };
@@ -254,11 +254,11 @@ fn extractZip(allocator: Allocator, zip_path: []const u8, dest_path: []const u8)
 
 ```zig
 fn listZip(zip_path: []const u8) !void {
-    const file = try std.fs.cwd().openFile(zip_path, .{});
+    const file = try std.Io.Dir.cwd().openFile(zip_path, .{});
     defer file.close();
 
     var buf: [4096]u8 = undefined;
-    var file_reader = file.reader(&buf);
+    var file_reader = file.reader(io, &buf);
 
     var iter = try std.zip.Iterator.init(&file_reader);
 
@@ -295,9 +295,9 @@ fn listZip(zip_path: []const u8) !void {
 
 ```zig
 fn extractFile(
-    file_reader: *std.fs.File.Reader,
+    file_reader: *std.Io.File.Reader,
     target_name: []const u8,
-    dest: std.fs.Dir,
+    dest: std.Io.Dir,
 ) !bool {
     var iter = try std.zip.Iterator.init(file_reader);
 
@@ -320,11 +320,11 @@ fn extractFile(
 
 ```zig
 fn isZipFile(path: []const u8) !bool {
-    const file = std.fs.cwd().openFile(path, .{}) catch return false;
+    const file = std.Io.Dir.cwd().openFile(path, .{}) catch return false;
     defer file.close();
 
     var buf: [4096]u8 = undefined;
-    var file_reader = file.reader(&buf);
+    var file_reader = file.reader(io, &buf);
 
     _ = std.zip.EndRecord.findFile(&file_reader) catch return false;
     return true;

@@ -1,17 +1,22 @@
-# std.time - Time and Timing (0.15.x → 0.16)
+# std.time - Time and Timing (0.16)
 
 Wall-clock timestamps, monotonic timers, high-precision timing, and epoch/calendar utilities.
 
-## Critical: Wall-Clock Timestamps Removed (0.16)
+## Critical: Wall-Clock Timestamps, Instant, and Timer Removed (0.16)
 
-`std.time.timestamp()`, `milliTimestamp()`, `microTimestamp()`, and `nanoTimestamp()` are **removed** in Zig 0.16. Use `std.c.clock_gettime` directly:
+`std.time.timestamp()`, `milliTimestamp()`, `microTimestamp()`, `nanoTimestamp()`, `std.time.Instant`, and `std.time.Timer` are **all removed** in Zig 0.16. `std.time` itself now contains *only* the unit constants (`ns_per_s`, ...) and the `epoch` calendar-conversion module — no clock access at all.
+
+Two 0.16 replacements exist, depending on whether you have an `Io` instance:
+
+- **With an `Io` instance:** use `std.Io.Clock` (`Clock.now(io)`, `Clock.Timestamp`, `Clock.Duration`) — see below. This is the idiomatic 0.16 way and is portable.
+- **Without an `Io` instance** (e.g. deep library code): fall back to `std.c.clock_gettime` directly:
 
 ```zig
 // WRONG (0.16) — functions removed
 const secs = std.time.timestamp();
 const ms = std.time.milliTimestamp();
 
-// CORRECT — clock_gettime replacements
+// CORRECT — clock_gettime replacements (no Io available)
 fn timestampSec() i64 {
     var ts: std.c.timespec = undefined;
     _ = std.c.clock_gettime(.REALTIME, &ts);
@@ -33,9 +38,9 @@ fn nanoTimestamp() i128 {
 
 **Important:** `ts.nsec` is signed — use `@divTrunc`, not `/` (0.16 enforces `@divTrunc` for signed integer division).
 
-**Still present in 0.16:** `std.time.ns_per_s` and all time constants, `Instant`, `Timer`.
+**Still present in 0.16:** `std.time.ns_per_s` and all the other unit constants, and `std.time.epoch`. **Removed, no `std.time` member at all anymore:** `Instant`, `Timer`, and every timestamp function.
 
-**Also removed in 0.16:** `std.Thread.sleep` — use nanosleep:
+**Also removed in 0.16:** `std.Thread.sleep` — with an `Io`, use `io.sleep(duration, clock)`; without one, nanosleep via `std.c.nanosleep`:
 ```zig
 fn threadSleep(ns: u64) void {
     const ts = std.c.timespec{
@@ -48,135 +53,123 @@ fn threadSleep(ns: u64) void {
 
 ## Quick Reference
 
-| Category | Types/Functions |
-|----------|-----------------|
-| Timestamps | `timestamp`, `milliTimestamp`, `microTimestamp`, `nanoTimestamp` |
-| Monotonic | `Instant`, `Timer` |
-| Epoch | `epoch.EpochSeconds`, `epoch.EpochDay`, `epoch.DaySeconds` |
-| Calendar | `epoch.Year`, `epoch.Month`, `epoch.YearAndDay`, `epoch.MonthAndDay` |
-| Constants | `ns_per_*`, `us_per_*`, `ms_per_*`, `s_per_*` |
+| Category | With `Io` (0.16) | Without `Io` (fallback) |
+|----------|-------------------|--------------------------|
+| Wall-clock timestamp | `Io.Clock.now(io, .real)` → `Io.Timestamp` | `std.c.clock_gettime(.REALTIME, &ts)` |
+| Monotonic / elapsed time | `Io.Clock.Timestamp.now(io, .awake)` + `.untilNow(io)` | n/a — needs some clock source |
+| Sleep | `io.sleep(duration, clock)` | `std.c.nanosleep` |
+| Epoch / calendar | `std.time.epoch.*` (unchanged) | same |
+| Constants | `std.time.ns_per_*`, `us_per_*`, `ms_per_*`, `s_per_*` (unchanged) | same |
 
 ## Choosing the Right Function
 
 ```
 Need wall-clock time (date/time)?
-├─ Yes → timestamp(), milliTimestamp(), microTimestamp(), nanoTimestamp()
-└─ No → Need elapsed time / benchmarking?
-       ├─ Yes → Timer or Instant
-       └─ No → Need monotonic guarantee?
-              ├─ Yes → Timer (saturates on backward jumps)
-              └─ No → Instant.now()
+├─ Have an Io? → Io.Clock.now(io, .real)
+└─ No Io?      → std.c.clock_gettime(.REALTIME, &ts)
+
+Need elapsed time / benchmarking / monotonic guarantee?
+├─ Have an Io? → Io.Clock.Timestamp.now(io, .awake), then .untilNow(io)
+└─ No Io?      → you need some clock source; std.c.clock_gettime(.MONOTONIC, ...) works too
 ```
 
-| Function | Resolution | Range | Use Case |
-|----------|------------|-------|----------|
-| `timestamp()` | 1 second | i64 | Log timestamps, file dates |
-| `milliTimestamp()` | 1 ms | i64 | General timing, UI |
-| `microTimestamp()` | 1 μs | i64 | Profiling |
-| `nanoTimestamp()` | 1-100 ns | i128 | High-precision timing |
-| `Instant.now()` | ~1 ns | u64 | Elapsed time, ticks during suspend |
-| `Timer` | ~1 ns | u64 | Benchmarking with monotonic guarantee |
+## Wall-Clock Timestamps (with an Io instance)
 
-## Wall-Clock Timestamps
-
-**Note (0.16):** These functions are removed in Zig 0.16. See migration section above for replacements.
-
-Get current time relative to Unix epoch (1970-01-01 UTC):
+Get current time relative to Unix epoch (1970-01-01 UTC), via `std.Io.Clock`:
 
 ```zig
 const std = @import("std");
 
-pub fn main() void {
-    // Seconds since epoch
-    const secs = std.time.timestamp();  // i64
+pub fn main(init: std.process.Init) void {
+    const io = init.io;
+    // A Timestamp of nanosecond resolution (i96 internally)
+    const now: std.Io.Timestamp = std.Io.Clock.now(.real, io);
 
-    // Higher precision
-    const ms = std.time.milliTimestamp();  // i64
-    const us = std.time.microTimestamp();  // i64
-    const ns = std.time.nanoTimestamp();   // i128
+    const secs = now.toSeconds();        // i64
+    const ms = now.toMilliseconds();     // i64
+    const us = now.toMicroseconds();     // i64
+    const ns = now.toNanoseconds();      // i96
+    _ = .{ secs, ms, us, ns };
 }
 ```
 
-**Platform notes:**
-- Windows: 100ns granularity via `RtlGetSystemTimePrecise`
-- POSIX: Uses `clock_gettime(REALTIME)`
-- WASI/UEFI: Platform-specific implementations
+**Clock kinds** (`std.Io.Clock`): `.real` (wall clock, like the old `REALTIME`), `.awake` (monotonic, excludes suspend time), `.boot` (monotonic, includes suspend time), `.cpu_process`, `.cpu_thread`.
 
-## Instant - High-Resolution Timestamps
+## Clock.Timestamp - High-Resolution, Clock-Tagged Timestamps
 
-`Instant` samples the system's fastest clock, ticking during suspend:
+`Io.Clock.Timestamp` replaces `Instant`: it samples a specific clock and remembers which one, so you can later compute the duration since then without re-specifying the clock:
 
 ```zig
 const std = @import("std");
 
-pub fn main() !void {
-    const start = try std.time.Instant.now();
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const start: std.Io.Clock.Timestamp = .now(io, .awake);
 
     // ... work ...
 
-    const end = try std.time.Instant.now();
-    const elapsed_ns = end.since(start);  // u64 nanoseconds
+    const elapsed: std.Io.Clock.Duration = start.untilNow(io);
+    const elapsed_ns = elapsed.raw.toNanoseconds();  // i96 nanoseconds
 
-    std.debug.print("Elapsed: {} ns\n", .{elapsed_ns});
+    std.debug.print("Elapsed: {d} ns\n", .{elapsed_ns});
 }
 ```
 
-### Instant Methods
+### Clock.Timestamp Methods
 
 ```zig
-// Get current instant (may fail on hostile environments)
-const instant = try std.time.Instant.now();
+// Get current timestamp on a given clock
+const t: std.Io.Clock.Timestamp = .now(io, .awake);
 
-// Compare two instants
-const order = instant.order(other);  // .lt, .eq, or .gt
+// Compare two timestamps on the SAME clock
+const same = t.compare(.eq, other);  // asserts same clock
 
-// Elapsed time in nanoseconds
-const ns = later.since(earlier);
+// Duration between two timestamps on the same clock
+const d = earlier.durationTo(later);
+
+// Duration from `t` until now
+const since = t.untilNow(io);
+
+// Wait until this timestamp arrives
+try t.wait(io);
 ```
 
-**Platform-specific clocks:**
-- macOS/iOS: `UPTIME_RAW` (ticks during suspend)
-- Linux: `BOOTTIME` (ticks during suspend)
-- FreeBSD: `MONOTONIC_FAST`
-- Windows: `QueryPerformanceCounter`
+There is no `error.Unsupported` from `.now()` in 0.16 — an unsupported clock simply has `resolution(io)` (via `Clock.resolution`) equal to zero; `.now()` itself does not fail (it is not cancelable, since it does not block).
 
-## Timer - Monotonic Benchmarking
+## Clock.Duration - Monotonic Benchmarking
 
-`Timer` provides monotonic timing by saturating on backward clock jumps:
+`Io.Clock.Duration` (a `raw: Io.Duration` tagged with a `clock: Clock`) replaces `Timer`. There is no `.lap()`/`.reset()` — recompute from a stored `Clock.Timestamp` instead:
 
 ```zig
 const std = @import("std");
 
-pub fn main() !void {
-    var timer = try std.time.Timer.start();
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    var start: std.Io.Clock.Timestamp = .now(io, .awake);
 
     // ... first phase ...
-    const phase1_ns = timer.lap();  // read and reset
+    const phase1 = start.untilNow(io);
+    start = .now(io, .awake);  // "reset"
 
     // ... second phase ...
-    const phase2_ns = timer.lap();
+    const phase2 = start.untilNow(io);
 
-    // Total since start
-    timer.reset();
-    // ... final phase ...
-    const total_ns = timer.read();
+    _ = .{ phase1, phase2 };
 }
 ```
 
-### Timer Methods
+### Io.Duration Methods (the `.raw` field of a Clock.Duration)
 
 ```zig
-// Initialize timer
-var timer = try std.time.Timer.start();  // error.TimerUnsupported if no clock
+const d: std.Io.Duration = elapsed.raw;
 
-// Read elapsed nanoseconds since start/reset
-const elapsed = timer.read();
+d.toNanoseconds();   // i96
+d.toMicroseconds();  // i64
+d.toMilliseconds();  // i64
+d.toSeconds();        // i64
 
-// Reset timer to zero/now
-timer.reset();
-
-// Read and reset in one call
-const lap_time = timer.lap();
+// Construct directly (not tied to a clock)
+const half_second = std.Io.Duration.fromMilliseconds(500);
 ```
 
 ## Time Unit Constants
@@ -209,7 +202,7 @@ std.time.s_per_week;   // 604_800
 
 ## Epoch Module - Calendar Conversions
 
-Convert epoch timestamps to year/month/day/time components:
+Unchanged in 0.16. Convert epoch timestamps to year/month/day/time components:
 
 ### EpochSeconds to Calendar
 
@@ -217,8 +210,9 @@ Convert epoch timestamps to year/month/day/time components:
 const std = @import("std");
 const epoch = std.time.epoch;
 
-pub fn main() void {
-    const secs: u64 = @intCast(std.time.timestamp());
+pub fn main(init: std.process.Init) void {
+    const io = init.io;
+    const secs: u64 = @intCast(std.Io.Clock.now(.real, io).toSeconds());
     const es = epoch.EpochSeconds{ .secs = secs };
 
     // Get day and time components
@@ -291,15 +285,15 @@ epoch.clr;     // -62135769600 (Jan 01, 0001 - .NET/Go)
 ### Simple Benchmark
 
 ```zig
-pub fn benchmark(comptime func: anytype) u64 {
-    var timer = std.time.Timer.start() catch return 0;
+pub fn benchmark(io: std.Io, comptime func: anytype) i96 {
+    const start: std.Io.Clock.Timestamp = .now(io, .awake);
     func();
-    return timer.read();
+    return start.untilNow(io).raw.toNanoseconds();
 }
 
 // Usage
-const ns = benchmark(myExpensiveFunction);
-std.debug.print("Took {} ns\n", .{ns});
+const ns = benchmark(io, myExpensiveFunction);
+std.debug.print("Took {d} ns\n", .{ns});
 ```
 
 ### Format Timestamp as ISO 8601
@@ -327,18 +321,15 @@ fn formatTimestamp(secs: u64, buf: []u8) []u8 {
 ### Timeout Loop
 
 ```zig
-fn waitWithTimeout(timeout_ns: u64) !void {
-    const deadline = (try std.time.Instant.now()).timestamp + timeout_ns;
+fn waitWithTimeout(io: std.Io, timeout_ns: i96) !void {
+    const start: std.Io.Clock.Timestamp = .now(io, .awake);
 
     while (true) {
         if (try checkCondition()) return;
 
-        const now = try std.time.Instant.now();
-        if (now.timestamp >= deadline) return error.Timeout;
+        if (start.untilNow(io).raw.toNanoseconds() >= timeout_ns) return error.Timeout;
 
-        // 0.15.x: std.Thread.sleep
-        // 0.16: Thread.sleep removed — use std.c.nanosleep instead
-        threadSleep(std.time.ns_per_ms);  // 1ms (threadSleep helper defined above)
+        try io.sleep(.fromMilliseconds(1), .awake);  // 1ms
     }
 }
 ```
@@ -347,8 +338,8 @@ fn waitWithTimeout(timeout_ns: u64) !void {
 
 ```zig
 const RateLimiter = struct {
-    interval_ns: u64,
-    last: ?std.time.Instant,
+    interval_ns: i96,
+    last: ?std.Io.Clock.Timestamp,
 
     pub fn init(ops_per_second: u64) RateLimiter {
         return .{
@@ -357,15 +348,14 @@ const RateLimiter = struct {
         };
     }
 
-    pub fn acquire(self: *RateLimiter) void {
-        const now = std.time.Instant.now() catch return;
+    pub fn acquire(self: *RateLimiter, io: std.Io) !void {
         if (self.last) |last| {
-            const elapsed = now.since(last);
-            if (elapsed < self.interval_ns) {
-                threadSleep(self.interval_ns - elapsed);  // threadSleep helper defined above
+            const elapsed_ns = last.untilNow(io).raw.toNanoseconds();
+            if (elapsed_ns < self.interval_ns) {
+                try io.sleep(.fromNanoseconds(self.interval_ns - elapsed_ns), .awake);
             }
         }
-        self.last = std.time.Instant.now() catch null;
+        self.last = .now(io, .awake);
     }
 };
 ```
@@ -373,16 +363,16 @@ const RateLimiter = struct {
 ### Elapsed Time Formatting
 
 ```zig
-fn formatElapsed(ns: u64) struct { value: u64, unit: []const u8 } {
+fn formatElapsed(ns: i96) struct { value: i96, unit: []const u8 } {
     if (ns < std.time.ns_per_us) return .{ .value = ns, .unit = "ns" };
-    if (ns < std.time.ns_per_ms) return .{ .value = ns / std.time.ns_per_us, .unit = "us" };
-    if (ns < std.time.ns_per_s) return .{ .value = ns / std.time.ns_per_ms, .unit = "ms" };
-    return .{ .value = ns / std.time.ns_per_s, .unit = "s" };
+    if (ns < std.time.ns_per_ms) return .{ .value = @divTrunc(ns, std.time.ns_per_us), .unit = "us" };
+    if (ns < std.time.ns_per_s) return .{ .value = @divTrunc(ns, std.time.ns_per_ms), .unit = "ms" };
+    return .{ .value = @divTrunc(ns, std.time.ns_per_s), .unit = "s" };
 }
 
 // Usage
-const result = formatElapsed(timer.read());
-std.debug.print("Elapsed: {} {s}\n", .{ result.value, result.unit });
+const result = formatElapsed(elapsed.raw.toNanoseconds());
+std.debug.print("Elapsed: {d} {s}\n", .{ result.value, result.unit });
 ```
 
 ### Convert Between Epoch Systems
@@ -399,10 +389,9 @@ fn windowsToUnix(windows_secs: i64) i64 {
 
 ## Notes
 
-- `timestamp()` and variants return signed `i64`/`i128` (dates before 1970 are negative)
-- `Instant` and `Timer` use unsigned `u64` nanoseconds (~585 years max range)
-- `Instant.now()` can return `error.Unsupported` in restricted environments
-- `Timer` saturates on clock jumps backward (always monotonic)
-- `epoch.EpochSeconds` expects unsigned `u64` (use `@intCast` from `timestamp()`)
+- Wall-clock functions are gone from `std.time`; use `Io.Clock.now(io, .real)` (or `std.c.clock_gettime` with no `Io`) — see migration section above
+- `Io.Timestamp`/`Io.Duration` use signed `i96` nanoseconds internally
+- `Io.Clock.Timestamp.now()` does not fail — an unsupported clock just has zero `resolution()`, it does not error
+- `epoch.EpochSeconds` expects unsigned `u64` (use `@intCast` from a timestamp's `.toSeconds()`)
 - Day and month indices in epoch module are 0-based
-- For sleeping: `std.Thread.sleep(ns)` (0.15.x) or `nanosleep` via `std.c.nanosleep` (0.16 — `Thread.sleep` removed)
+- For sleeping: `io.sleep(duration, clock)` (0.16, with `Io`) or `nanosleep` via `std.c.nanosleep` (0.16, no `Io` — `Thread.sleep` removed either way)

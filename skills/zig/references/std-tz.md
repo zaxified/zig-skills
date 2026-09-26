@@ -16,17 +16,19 @@ Parse IANA Time Zone Database files (TZif format, RFC 8536). Used to look up UTC
 ```zig
 const std = @import("std");
 
-pub fn main() !void {
+pub fn main(io: std.Io) !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    // Open system timezone file
-    const file = try std.fs.openFileAbsolute("/usr/share/zoneinfo/America/New_York", .{});
-    defer file.close();
+    // Open system timezone file — std.Io.Dir.openFileAbsolute(io, path, options) (was std.fs.openFileAbsolute)
+    const file = try std.Io.Dir.openFileAbsolute(io, "/usr/share/zoneinfo/America/New_York", .{});
+    defer file.close(io);
 
-    // Parse TZif data
-    var tz = try std.Tz.parse(allocator, file.reader());
+    // Parse TZif data — file.reader(io, buf) returns a wrapper; pass &wrapper.interface
+    var buf: [4096]u8 = undefined;
+    var file_reader = file.reader(io, &buf);
+    var tz = try std.Tz.parse(allocator, &file_reader.interface);
     defer tz.deinit();
 
     // Access timezone information
@@ -44,8 +46,9 @@ const std = @import("std");
 const tokyo_tz = @embedFile("tz/asia_tokyo.tzif");
 
 pub fn main() !void {
-    var stream = std.io.fixedBufferStream(tokyo_tz);
-    var tz = try std.Tz.parse(std.heap.page_allocator, stream.reader());
+    // 0.16: no std.io.fixedBufferStream — std.Io.Reader.fixed() reads directly from the slice
+    var reader: std.Io.Reader = .fixed(tokyo_tz);
+    var tz = try std.Tz.parse(std.heap.page_allocator, &reader);
     defer tz.deinit();
 
     // Use timezone data...
@@ -111,7 +114,7 @@ pub const Leapsecond = struct {
 ```zig
 fn getUtcOffset(tz: *const std.Tz, unix_timestamp: i64) i32 {
     // Find the last transition before or at the given timestamp
-    var result: ?*const std.Timetype = null;
+    var result: ?*const std.tz.Timetype = null;
 
     for (tz.transitions) |t| {
         if (t.ts <= unix_timestamp) {
@@ -154,7 +157,7 @@ fn isDstActive(tz: *const std.Tz, unix_timestamp: i64) bool {
 
 ```zig
 fn getTimezoneAbbrev(tz: *const std.Tz, unix_timestamp: i64) []const u8 {
-    var result: ?*const std.Timetype = null;
+    var result: ?*const std.tz.Timetype = null;
 
     for (tz.transitions) |t| {
         if (t.ts <= unix_timestamp) {

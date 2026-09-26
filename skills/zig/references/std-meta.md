@@ -333,13 +333,13 @@ const decls = std.meta.declarations(S);
 ## Error Handling
 
 ```zig
-// Check if value is error (deprecated: use std.enums.fromInt)
+// Check if value is error
 const result = std.math.divTrunc(u8, 5, 0);
 std.meta.isError(result)  // true
 
-// Enum from int (deprecated: use std.enums.fromInt)
+// Enum from int — 0.16: std.meta.intToEnum is gone; std.enums.fromInt returns ?Enum directly
 const Color = enum { red, green, blue };
-const c = std.meta.intToEnum(Color, 1) catch unreachable;  // Color.green
+const c = std.enums.fromInt(Color, 1) orelse unreachable;  // Color.green
 ```
 
 ## TrailerFlags

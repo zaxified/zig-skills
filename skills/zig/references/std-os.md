@@ -1,6 +1,6 @@
-# std.os - OS-Specific APIs Reference
+# std.os - OS-Specific APIs Reference (0.16)
 
-Thin wrappers around OS-specific APIs in Zig 0.15.x. Converts errno-style error codes to Zig errors, provides slice-accepting APIs alongside null-terminated ones, and offers cross-platform abstractions for POSIX systems.
+Thin wrappers around OS-specific APIs. `std.os` itself shrank a lot in 0.16 — it is now just a namespace of six platform submodules, nothing else at its own top level. Converts errno-style error codes to Zig errors, provides slice-accepting APIs alongside null-terminated ones, and offers cross-platform abstractions for POSIX systems (via `std.posix`).
 
 ## Table of Contents
 - [Module Structure](#module-structure)
@@ -21,10 +21,13 @@ std.os.wasi       // WebAssembly System Interface
 std.os.plan9      // Plan 9 system calls
 std.os.uefi       // UEFI firmware interface
 std.os.emscripten // Emscripten runtime
-std.os.freebsd    // FreeBSD-specific definitions
+```
 
-std.os.environ    // Environment variables (populated at startup)
-std.os.argv       // Command line arguments (POSIX only)
+**0.16 change:** that's the whole namespace now — there is no `std.os.freebsd` (FreeBSD, like macOS, goes through `std.c` instead of its own `std.os` submodule) and no bare `std.os.environ`/`std.os.argv`. Environment and argv access moved to `std.process`:
+
+```zig
+std.process.Environ  // environment access (was std.os.environ)
+std.process.Args     // command-line argument access (was std.os.argv)
 ```
 
 **Note**: For most use cases, prefer `std.posix` (cross-platform POSIX-like APIs) or `std.fs`/`std.process` (high-level abstractions). Use `std.os` when you need direct OS-specific functionality.
@@ -35,10 +38,10 @@ std.os.argv       // Command line arguments (POSIX only)
 
 ```zig
 // High-level (recommended for most code)
-const file = try std.fs.cwd().openFile("data.txt", .{});
+const file = try std.Io.Dir.cwd().openFile("data.txt", .{});
 
-// POSIX-level (cross-platform low-level)
-const fd = try std.posix.open("data.txt", .{}, 0);
+// POSIX-level (cross-platform low-level) — 0.16: std.posix.open is gone, use openat with AT.FDCWD
+const fd = try std.posix.openat(std.posix.AT.FDCWD, "data.txt", .{}, 0);
 
 // OS-specific (platform-specific features)
 const result = std.os.linux.syscall3(.read, fd, buf.ptr, buf.len);
@@ -53,7 +56,7 @@ const linux = std.os.linux;
 
 // Raw syscall interface
 const result = linux.syscall3(.write, fd, @intFromPtr(buf.ptr), buf.len);
-if (linux.E.init(result) != .SUCCESS) {
+if (linux.errno(result) != .SUCCESS) {  // was linux.E.init in 0.15.x, renamed errno in 0.16
     // handle error
 }
 
@@ -391,7 +394,7 @@ while (ring.cq_ready() > 0) {
     const result = cqe.res;  // bytes transferred or -errno
 
     if (result < 0) {
-        const err = std.os.linux.E.init(@intCast(-result));
+        const err = std.os.linux.errno(@intCast(-result));  // was E.init, renamed errno in 0.16
         // handle error
     }
 
@@ -480,50 +483,47 @@ sqe.flags |= std.os.linux.IOSQE_FIXED_FILE;
 
 ## Common Functions
 
-### getFdPath
+### getFdPath → File.realPath (0.16)
 
-Get canonical path from file descriptor (not all platforms).
+**Removed in 0.16:** `std.os.getFdPath`/`std.os.isGetFdPathSupportedOnTarget` are gone. The replacement is `std.Io.File.realPath(io, buffer)`, which returns the length written and simply fails with `error.OperationUnsupported` at runtime instead of requiring a comptime support check:
 
 ```zig
-var buf: [std.fs.max_path_bytes]u8 = undefined;
-const path = try std.os.getFdPath(fd, &buf);
-std.debug.print("Path: {s}\n", .{path});
-
-// Check if supported at comptime
-if (comptime std.os.isGetFdPathSupportedOnTarget(builtin.os)) {
-    // safe to call
-}
+var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+const file: std.Io.File = ...;
+const len = try file.realPath(io, &buf);
+std.debug.print("Path: {s}\n", .{buf[0..len]});
 ```
 
 **Supported**: Linux, macOS, FreeBSD, Windows, Solaris/illumos, DragonFly (6.0+), NetBSD (10.0+)
 
-### accessW (Windows)
+### accessW (Windows) → Dir.access (0.16)
 
-Check file accessibility with WTF-16LE path.
+**Removed in 0.16:** `std.os.accessW` (raw WTF-16LE path) is gone. Use the cross-platform `std.Io.Dir.access`, which accepts a WTF-8 path and handles the WTF-16 conversion internally on Windows:
 
 ```zig
-const path_w = std.unicode.utf8ToUtf16LeStringLiteral("C:\\file.txt");
-std.os.accessW(path_w) catch |err| switch (err) {
+std.Io.Dir.cwd().access(io, "C:\\file.txt", .{}) catch |err| switch (err) {
     error.FileNotFound => {},
     error.AccessDenied => {},
     else => return err,
 };
 ```
 
-### WASI stat functions
+### WASI stat functions → File.stat / Dir.statFile (0.16)
+
+**Removed in 0.16:** `std.os.fstat_wasi`/`std.os.fstatat_wasi` are gone with no direct WASI-specific replacement — use the ordinary cross-platform stat API, which also works on WASI:
 
 ```zig
-// stat by path
-const stat = try std.os.fstatat_wasi(dirfd, path, .{ .SYMLINK_FOLLOW = true });
-
 // stat by fd
-const stat = try std.os.fstat_wasi(fd);
+const stat = try file.stat(io);  // std.Io.File.stat
 
-stat.size;      // file size
-stat.filetype;  // .REGULAR_FILE, .DIRECTORY, .SYMBOLIC_LINK, etc.
-stat.atim;      // access time (nanoseconds)
-stat.mtim;      // modification time
-stat.ctim;      // status change time
+// stat by path, relative to a dir
+const stat2 = try dir.statFile(io, path, .{});  // std.Io.Dir.statFile
+
+stat.size;   // file size
+stat.kind;   // .file, .directory, .sym_link, etc.
+stat.atime;  // Io.Timestamp - access time
+stat.mtime;  // Io.Timestamp - modification time
+stat.ctime;  // Io.Timestamp - status change time
 ```
 
 ## Common Patterns
@@ -580,7 +580,7 @@ const linux = std.os.linux;
 fn readSyscall(fd: i32, buf: []u8) !usize {
     const result = linux.syscall3(.read, @intCast(fd), @intFromPtr(buf.ptr), buf.len);
 
-    switch (linux.E.init(result)) {
+    switch (linux.errno(result)) {  // was E.init, renamed errno in 0.16
         .SUCCESS => return result,
         .INTR => return error.Interrupted,
         .AGAIN => return error.WouldBlock,
@@ -614,13 +614,10 @@ fn windowsOperation() !void {
 ### Cross-Platform File Descriptor Path
 
 ```zig
-fn getFilePath(fd: std.posix.fd_t, allocator: Allocator) ![]u8 {
-    if (comptime !std.os.isGetFdPathSupportedOnTarget(builtin.os)) {
-        return error.Unsupported;
-    }
-
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
-    const path = try std.os.getFdPath(fd, &buf);
-    return try allocator.dupe(u8, path);
+fn getFilePath(io: std.Io, file: std.Io.File, allocator: Allocator) ![]u8 {
+    // 0.16: no comptime support check needed — File.realPath fails with error.OperationUnsupported
+    var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const len = try file.realPath(io, &buf);
+    return try allocator.dupe(u8, buf[0..len]);
 }
 ```

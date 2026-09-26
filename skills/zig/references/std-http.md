@@ -218,19 +218,23 @@ for (0..10) |_| {
 
 ### Proxy Configuration
 
+**0.16:** `std.http.Proxy` is `std.http.Client.Proxy` (nested under `Client`, not a top-level `std.http` member); its `host` field is a `std.Io.net.HostName` (`.{ .bytes = "..." }`), not a raw string. `initDefaultProxies` also now takes an explicit `*const std.process.Environ.Map` (built from a `std.process.Environ` via `.createMap(gpa)`) instead of reading the environment itself:
+
 ```zig
 var client: std.http.Client = .{ .allocator = allocator };
 defer client.deinit();
 
-// Load from environment (HTTP_PROXY, HTTPS_PROXY, etc.)
+// Load from environment (HTTP_PROXY, HTTPS_PROXY, etc.) — `environ_map` here is a
+// std.process.Environ.Map built from whatever std.process.Environ your program already has
+// (e.g. the one an Io.Threaded.InitOptions was configured with).
 var arena = std.heap.ArenaAllocator.init(allocator);
 defer arena.deinit();
-try client.initDefaultProxies(arena.allocator());
+try client.initDefaultProxies(arena.allocator(), &environ_map);
 
 // Or configure manually:
-var proxy: std.http.Proxy = .{
+var proxy: std.http.Client.Proxy = .{
     .protocol = .plain,
-    .host = "proxy.example.com",
+    .host = .{ .bytes = "proxy.example.com" },
     .port = 8080,
     .authorization = null,  // or "Basic base64credentials"
     .supports_connect = true,
@@ -260,7 +264,7 @@ client.next_https_rescan_certs = true;
 
 ```zig
 const std = @import("std");
-const net = std.net;
+const net = std.Io.net;  // 0.16: std.net is gone, use std.Io.net (see std-net.md)
 const http = std.http;
 
 pub fn main() !void {
@@ -275,8 +279,8 @@ pub fn main() !void {
         var read_buf: [8192]u8 = undefined;
         var write_buf: [4096]u8 = undefined;
 
-        var reader = conn.stream.reader(&read_buf);
-        var writer = conn.stream.writer(&write_buf);
+        var reader = conn.stream.reader(io, &read_buf);
+        var writer = conn.stream.writer(io, &write_buf);
 
         var server = http.Server.init(reader.interface(), &writer.interface);
 
@@ -581,7 +585,7 @@ fn fetchJson(comptime T: type, allocator: Allocator, url: []const u8) !T {
 
 ```zig
 fn postJson(allocator: Allocator, url: []const u8, data: anytype) !void {
-    const json = try std.json.stringifyAlloc(allocator, data, .{});
+    const json = try std.json.Stringify.valueAlloc(allocator, data, .{});
     defer allocator.free(json);
 
     var client: std.http.Client = .{ .allocator = allocator };
@@ -618,11 +622,11 @@ fn downloadFile(allocator: Allocator, url: []const u8, path: []const u8) !void {
 
     if (response.head.status != .ok) return error.HttpError;
 
-    const file = try std.fs.cwd().createFile(path, .{});
+    const file = try std.Io.Dir.cwd().createFile(path, .{});
     defer file.close();
 
     var file_buf: [4096]u8 = undefined;
-    var file_writer = file.writer(&file_buf);
+    var file_writer = file.writer(io, &file_buf);
 
     var reader_buf: [4096]u8 = undefined;
     const body_reader = response.reader(&reader_buf);

@@ -275,13 +275,14 @@ std.crypto.hash.sha2.Sha256.hash(&alice_shared, &key, .{});
 ### ML-KEM (Post-Quantum)
 
 ```zig
-const MlKem768 = std.crypto.kem.ml_kem.MlKem768;
+// Note capitalization: MLKem768, not MlKem768
+const MLKem768 = std.crypto.kem.ml_kem.MLKem768;
 
-// Key generation
-const kp = MlKem768.KeyPair.generate();
+// Key generation — needs an `io: Io` for randomness (std.crypto.random is gone)
+const kp = MLKem768.KeyPair.generate(io);
 
-// Encapsulation (sender)
-const encaps = kp.public_key.encaps(null);
+// Encapsulation (sender) — also needs `io`, no more optional seed param
+const encaps = kp.public_key.encaps(io);
 const shared_secret = encaps.shared_secret;
 const ciphertext = encaps.ciphertext;
 
@@ -290,7 +291,7 @@ const decaps_secret = try kp.secret_key.decaps(ciphertext);
 // shared_secret == decaps_secret
 ```
 
-Available: `MlKem512`, `MlKem768`, `MlKem1024`
+Available: `MLKem512`, `MLKem768`, `MLKem1024`
 
 ## Key Derivation
 
@@ -415,9 +416,10 @@ arc4random_buf(&key, key.len);
 _ = std.os.linux.getrandom(buf.ptr, buf.len, 0);
 ```
 
-Thread-local cryptographically secure PRNG (0.15.x):
+Thread-local cryptographically secure PRNG:
 
 ```zig
+// OLD (0.15.x) — std.crypto.random removed in 0.16
 const random = std.crypto.random;
 
 // Random bytes
@@ -433,6 +435,19 @@ const f = random.float(f64);
 
 // Shuffle
 random.shuffle(u32, &items);
+```
+
+**0.16 replacement:** the `std.Random` interface (`.bytes`/`.int`/`.intRangeLessThan`/`.float`/`.shuffle`) is unchanged — only the pre-built thread-local secure instance is gone. Seed `std.Random.DefaultCsprng` (ChaCha) from `io.randomSecure`, once, and reuse it:
+
+```zig
+var seed: [std.Random.DefaultCsprng.secret_seed_length]u8 = undefined;
+try io.randomSecure(&seed);
+var csprng = std.Random.DefaultCsprng.init(seed);
+const random = csprng.random();
+
+var key: [32]u8 = undefined;
+random.bytes(&key);
+const n = random.int(u64);
 ```
 
 ## Secure Utilities
