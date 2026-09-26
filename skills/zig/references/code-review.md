@@ -1,4 +1,4 @@
-# Zig Code Review Reference (0.15.x)
+# Zig Code Review Reference (0.16.0)
 
 Systematic code review checklist organized by detection confidence level. Work through sections in order: ALWAYS FLAG → FLAG WITH CONTEXT → SUGGEST.
 
@@ -734,10 +734,12 @@ fn getSymbol(index: SymbolIndex) *Symbol { ... }
 
 **Anti-pattern: Blind try propagation**
 ```zig
-fn processFile(path: []const u8) !Data {
-    const file = try std.Io.Dir.cwd().openFile(path, .{});  // Which error occurred?
-    defer file.close();
-    const data = try file.readToEndAlloc(allocator, max_size);
+fn processFile(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !Data {
+    const file = try std.Io.Dir.cwd().openFile(io, path, .{});  // Which error occurred?
+    defer file.close(io);
+    var buf: [4096]u8 = undefined;
+    var file_reader = file.reader(io, &buf);
+    const data = try file_reader.interface.allocRemaining(allocator, .limited(max_size));
     return parseData(data);
 }
 // Caller can't distinguish "file not found" from "parse error"
@@ -745,13 +747,15 @@ fn processFile(path: []const u8) !Data {
 
 **Correct pattern: Specific error handling when needed**
 ```zig
-fn processFile(path: []const u8) !Data {
-    const file = std.Io.Dir.cwd().openFile(path, .{}) catch |err| switch (err) {
+fn processFile(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !Data {
+    const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch |err| switch (err) {
         error.FileNotFound => return error.ConfigNotFound,  // Meaningful error
         else => |e| return e,
     };
-    defer file.close();
-    const data = try file.readToEndAlloc(allocator, max_size);
+    defer file.close(io);
+    var buf: [4096]u8 = undefined;
+    var file_reader = file.reader(io, &buf);
+    const data = try file_reader.interface.allocRemaining(allocator, .limited(max_size));
     return parseData(data);
 }
 ```
@@ -1233,8 +1237,7 @@ fn parseTokens(gpa: Allocator, input: []const u8) ![]Token {
 
     // Many allocations, one free
     var tokens: std.ArrayList(Token) = .empty;
-    tokens.init(scratch);
-    // ...
+    // ... try tokens.append(scratch, token) as each token is parsed
     return try gpa.dupe(Token, tokens.items);  // Copy final result to gpa
 }
 ```

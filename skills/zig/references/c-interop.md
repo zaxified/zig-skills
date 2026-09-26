@@ -690,14 +690,14 @@ export fn handle_create() ?*InternalState {
     const state = allocator.create(InternalState) catch return null;
     state.* = .{
         .allocator = allocator,
-        .data = std.ArrayList(u8).init(allocator),
+        .data = .empty,
     };
     return state;
 }
 
 export fn handle_destroy(h: ?*InternalState) void {
     if (h) |state| {
-        state.data.deinit();
+        state.data.deinit(state.allocator);
         state.allocator.destroy(state);
     }
 }

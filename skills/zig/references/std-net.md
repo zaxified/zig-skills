@@ -261,7 +261,7 @@ if (std.Io.net.has_unix_sockets) { ... }
 
 ---
 
-## TCP Client (0.15.x)
+## TCP Client (0.15.x, removed in 0.16)
 
 ### Connect by Hostname
 
@@ -320,7 +320,7 @@ defer stream.close();
 const link_local = try net.Address.resolveIp6("fe80::1%eth0", 8080);
 ```
 
-## TCP Server (0.15.x)
+## TCP Server (0.15.x, removed in 0.16)
 
 ### Basic Server
 
@@ -399,7 +399,7 @@ const port = server.listen_address.getPort();
 std.debug.print("Listening on port {d}\n", .{port});
 ```
 
-## Address Types (0.15.x)
+## Address Types (0.15.x, removed in 0.16)
 
 ### Address Union
 
@@ -504,7 +504,7 @@ const Ip6Address = extern struct {
 };
 ```
 
-## Stream I/O (0.15.x)
+## Stream I/O (0.15.x, removed in 0.16)
 
 ### Stream Type
 
@@ -588,7 +588,7 @@ const data = r.take(100) catch |err| switch (err) {
 };
 ```
 
-## DNS Resolution (0.15.x)
+## DNS Resolution (0.15.x, removed in 0.16)
 
 ### Get Address List
 
@@ -634,7 +634,7 @@ const stream = net.tcpConnectToHost(allocator, "example.com", 80) catch |err| sw
 };
 ```
 
-## Unix Sockets (0.15.x)
+## Unix Sockets (0.15.x, removed in 0.16)
 
 ### Check Platform Support
 
@@ -673,7 +673,7 @@ while (true) {
 }
 ```
 
-## Common Patterns (0.15.x)
+## Common Patterns (0.15.x, removed in 0.16)
 
 ### Echo Server
 
@@ -833,7 +833,7 @@ const Pool = struct {
 };
 ```
 
-## Error Types (0.15.x)
+## Error Types (0.15.x, removed in 0.16)
 
 ### Connection Errors
 

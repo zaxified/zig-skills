@@ -136,9 +136,10 @@ fn getUtcOffset(tz: *const std.Tz, unix_timestamp: i64) i32 {
     return 0;
 }
 
-// Usage
-const offset = getUtcOffset(&tz, std.time.timestamp());
-const local_time = unix_timestamp + offset;
+// Usage — std.time.timestamp() is removed in 0.16; use Io.Clock (see std-time.md)
+const now: i64 = std.Io.Clock.now(.real, io).toSeconds();
+const offset = getUtcOffset(&tz, now);
+const local_time = now + offset;
 ```
 
 ## Check if DST is Active

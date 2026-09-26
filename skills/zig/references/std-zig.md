@@ -624,9 +624,10 @@ if (std.zig.srcHashEql(hash1, hash2)) {
 ### Read Source File
 ```zig
 // Read and decode source file (handles UTF-16LE BOM)
-const file = try std.Io.Dir.cwd().openFile("source.zig", .{});
-defer file.close();
+const file = try std.Io.Dir.cwd().openFile(io, "source.zig", .{});
+defer file.close(io);
 
+var buf: [4096]u8 = undefined;
 var reader = file.reader(io, &buf);
 const source = try std.zig.readSourceFileToEndAlloc(allocator, &reader);
 defer allocator.free(source);

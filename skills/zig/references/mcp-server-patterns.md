@@ -100,15 +100,16 @@ pub const McpTransport = struct {
 pub const LspTransport = struct {
     pub const Reader = struct {
         file: std.Io.File,
+        io: std.Io,
         buf: [8192]u8 = undefined,
         buf_start: usize = 0,
         buf_end: usize = 0,
 
         fn readByte(self: *Reader) !?u8 {
+            const io = self.io;
             if (self.buf_start >= self.buf_end) {
-                const n = self.file.read(&self.buf) catch |err| switch (err) {
-                    error.BrokenPipe => return null,
-                    else => return err,
+                const n = self.file.readStreaming(io, &.{&self.buf}) catch |err| switch (err) {
+                    error.EndOfStream, error.ReadFailed => return null,
                 };
                 if (n == 0) return null;
                 self.buf_start = 0;
@@ -121,6 +122,7 @@ pub const LspTransport = struct {
 
         /// Drain internal buffer first, then read directly for large bodies.
         fn readExact(self: *Reader, dest: []u8) !bool {
+            const io = self.io;
             var pos: usize = 0;
             while (pos < dest.len) {
                 const buffered = self.buf_end - self.buf_start;
@@ -130,9 +132,8 @@ pub const LspTransport = struct {
                     self.buf_start += to_copy;
                     pos += to_copy;
                 } else {
-                    const n = self.file.read(dest[pos..]) catch |err| switch (err) {
-                        error.BrokenPipe => return false,
-                        else => return err,
+                    const n = self.file.readStreaming(io, &.{dest[pos..]}) catch |err| switch (err) {
+                        error.EndOfStream, error.ReadFailed => return false,
                     };
                     if (n == 0) return false;
                     pos += n;
@@ -143,13 +144,13 @@ pub const LspTransport = struct {
     };
 
     /// Write with Content-Length header using fixed stack buffer.
-    pub fn writeMessage(file: std.Io.File, data: []const u8) !void {
+    pub fn writeMessage(file: std.Io.File, io: std.Io, data: []const u8) !void {
         var header_buf: [64]u8 = undefined;
         var header_w: std.Io.Writer = .fixed(&header_buf);
         try header_w.print("Content-Length: {d}\r\n\r\n", .{data.len});
         const header = header_w.buffered();
-        try file.writeAll(header);
-        try file.writeAll(data);
+        try file.writeStreamingAll(io, header);
+        try file.writeStreamingAll(io, data);
     }
 };
 ```

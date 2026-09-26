@@ -40,8 +40,7 @@ def blocks():
         text = open(f, encoding="utf-8").read()
         for m in paths.BLOCK.finditer(text):
             b = m.group(1)
-            before = text[: m.start()].rstrip("\n").split("\n")[-1]
-            if paths.BAD_MARK.search(before) or paths.WRONG_LINE.search(b):
+            if paths.skip_block(text, m) or any(paths.WRONG_LINE.search(l) for l in b.split("\n")):
                 continue
             if '@import("std")' not in b:
                 continue

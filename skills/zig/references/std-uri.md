@@ -1,4 +1,4 @@
-# std.Uri Reference (0.15.x)
+# std.Uri Reference (0.16.0)
 
 URI parsing and formatting conforming to RFC 3986, with percent-encoding/decoding and resolution support.
 

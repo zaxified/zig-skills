@@ -191,16 +191,17 @@ Create an isolated temp directory for file system tests:
 
 ```zig
 test "file operations" {
+    const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});  // creates .zig-cache/tmp/<random>/
     defer tmp.cleanup();
 
     // Write and read files
-    var file = try tmp.dir.createFile("test.txt", .{});
-    defer file.close();
-    try file.writeAll("hello");
+    var file = try tmp.dir.createFile(io, "test.txt", .{});
+    defer file.close(io);
+    try file.writeStreamingAll(io, "hello");
 
     // Use tmp.dir for all operations
-    const content = try tmp.dir.readFileAlloc(std.testing.allocator, "test.txt", 1024);
+    const content = try tmp.dir.readFileAlloc(io, "test.txt", std.testing.allocator, .limited(1024));
     defer std.testing.allocator.free(content);
     try testing.expectEqualStrings("hello", content);
 }

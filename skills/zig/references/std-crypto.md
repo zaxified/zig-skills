@@ -544,13 +544,12 @@ Aes256Gcm.encrypt(&ct, &tag, pt, ad, nonce, key);
 ### Key Generation
 
 ```zig
-// For symmetric keys (0.15.x)
+// Symmetric key from the OS CSPRNG (std.crypto.random was removed in 0.16)
 var key: [32]u8 = undefined;
-std.crypto.random.bytes(&key);
-// NOTE: std.crypto.random.bytes is removed in 0.16 — use arc4random_buf or std.os.linux.getrandom
+try io.randomSecure(&key);
 
-// For asymmetric keys
-const kp = std.crypto.sign.Ed25519.KeyPair.generate();
+// Asymmetric keys: key generation takes the Io instance too
+const kp = std.crypto.sign.Ed25519.KeyPair.generate(io);
 ```
 
 ### Nonce Management

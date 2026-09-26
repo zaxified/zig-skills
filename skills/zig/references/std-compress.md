@@ -323,17 +323,18 @@ fn decompressZstd(allocator: Allocator, compressed: []const u8) ![]u8 {
 
 ```zig
 fn decompressToFile(
+    io: std.Io,
     input_path: []const u8,
     output_path: []const u8,
     container: std.compress.flate.Container,
 ) !void {
     const flate = std.compress.flate;
 
-    const input_file = try std.Io.Dir.cwd().openFile(input_path, .{});
-    defer input_file.close();
+    const input_file = try std.Io.Dir.cwd().openFile(io, input_path, .{});
+    defer input_file.close(io);
 
-    const output_file = try std.Io.Dir.cwd().createFile(output_path, .{});
-    defer output_file.close();
+    const output_file = try std.Io.Dir.cwd().createFile(io, output_path, .{});
+    defer output_file.close(io);
 
     var input_buf: [4096]u8 = undefined;
     var input_reader = input_file.reader(io, &input_buf);

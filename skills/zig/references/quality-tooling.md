@@ -2,8 +2,9 @@
 
 Coverage, dead code, duplication, linting and fuzzing. Zig ships none of these,
 and the usual third-party answers each have a trap that silently produces a
-green result. Everything below was verified against Zig `0.17.0-dev.1158` on
-macOS (aarch64) and cross-checked on Linux targets.
+green result. The measurements below were made against Zig `0.17.0-dev.1158` on
+macOS (aarch64) and cross-checked on Linux targets; the std APIs shown (the
+fuzzer in particular) exist in the released 0.16.0 as written.
 
 ## Quick Reference
 
@@ -161,7 +162,6 @@ Silencing:
 ### Signature changed — `*Smith`, not `[]const u8`
 
 ```zig
-// 0.17.0-dev: testOne receives a structured value generator
 test "fuzz parsePacket" {
     try std.testing.fuzz({}, fuzzOne, .{});
 }
@@ -175,7 +175,10 @@ fn fuzzOne(_: void, smith: *std.testing.Smith) !void {
 
 `Smith` generates values, not raw bytes: `smith.value(T)`,
 `smith.valueRangeAtMost(T, lo, hi)`, `smith.slice(buf)`,
-`smith.eosWeightedSimple(a, b)`. `FuzzInputOptions` is `.{ .corpus = &.{...} }`.
+`smith.eosWeightedSimple(a, b)` (each has a `...WithHash` variant taking an
+explicit call-site hash). `FuzzInputOptions` is `.{ .corpus = &.{...} }`.
+`slice` reads a 4-byte length before the bytes, so a raw corpus seed loses its
+first four bytes; see [zig-016-gotchas.md](zig-016-gotchas.md).
 
 **A doc comment cannot be attached to a `test`** — `///` above it is a compile
 error. Use `//`.

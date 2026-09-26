@@ -401,18 +401,19 @@ const Config = struct {
     debug: bool = false,
 };
 
-fn loadConfig(allocator: std.mem.Allocator, path: []const u8) !Config {
-    const file = std.Io.Dir.cwd().openFile(path, .{}) catch |err| switch (err) {
+fn loadConfig(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !Config {
+    const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch |err| switch (err) {
         error.FileNotFound => return Config{},
         else => return err,
     };
-    defer file.close();
+    defer file.close(io);
 
-    const content = try file.readToEndAllocOptions(
+    var buf: [4096]u8 = undefined;
+    var file_reader = file.reader(io, &buf);
+    const content = try file_reader.interface.allocRemainingAlignedSentinel(
         allocator,
-        1024 * 1024,
-        null,
-        @alignOf(u8),
+        .limited(1024 * 1024),
+        .of(u8),
         0,  // null terminator
     );
     defer allocator.free(content);
@@ -427,16 +428,16 @@ fn loadConfig(allocator: std.mem.Allocator, path: []const u8) !Config {
 ### Serialize to File
 
 ```zig
-fn saveConfig(allocator: std.mem.Allocator, config: Config, path: []const u8) !void {
+fn saveConfig(io: std.Io, allocator: std.mem.Allocator, config: Config, path: []const u8) !void {
     var aw: std.Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
 
     try std.zon.stringify.serialize(config, .{ .whitespace = true }, &aw.writer);
 
-    const file = try std.Io.Dir.cwd().createFile(path, .{});
-    defer file.close();
+    const file = try std.Io.Dir.cwd().createFile(io, path, .{});
+    defer file.close(io);
 
-    try file.writeAll(aw.written());
+    try file.writeStreamingAll(io, aw.written());
 }
 ```
 

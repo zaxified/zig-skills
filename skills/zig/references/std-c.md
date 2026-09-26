@@ -27,7 +27,7 @@ Use `std.c` when:
 Prefer higher-level alternatives when available:
 ```zig
 // High-level (recommended)
-const file = try std.Io.Dir.cwd().openFile("data.txt", .{});
+const file = try std.Io.Dir.cwd().openFile(io, "data.txt", .{});
 
 // POSIX-level — 0.16: std.posix.open is gone, use openat with AT.FDCWD
 const fd = try std.posix.openat(std.posix.AT.FDCWD, "data.txt", .{}, 0);

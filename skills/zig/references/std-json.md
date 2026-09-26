@@ -343,14 +343,16 @@ const Config = struct {
     debug: bool = false,
 };
 
-fn loadConfig(allocator: std.mem.Allocator, path: []const u8) !Config {
-    const file = std.Io.Dir.cwd().openFile(path, .{}) catch |err| switch (err) {
+fn loadConfig(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !Config {
+    const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch |err| switch (err) {
         error.FileNotFound => return Config{},  // defaults
         else => return err,
     };
-    defer file.close();
+    defer file.close(io);
 
-    const content = try file.readToEndAlloc(allocator, 1024 * 1024);
+    var buf: [4096]u8 = undefined;
+    var file_reader = file.reader(io, &buf);
+    const content = try file_reader.interface.allocRemaining(allocator, .limited(1024 * 1024));
     defer allocator.free(content);
 
     const parsed = try std.json.parseFromSlice(Config, allocator, content, .{

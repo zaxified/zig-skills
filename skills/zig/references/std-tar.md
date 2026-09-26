@@ -73,8 +73,8 @@ while (try it.next()) |file| {
     if (file.kind == .file) {
         // Option 1: Stream to writer
         var buf: [1024]u8 = undefined;
-        var output_file = try dir.createFile(file.name, .{});
-        defer output_file.close();
+        var output_file = try dir.createFile(io, file.name, .{});
+        defer output_file.close(io);
         var file_writer = output_file.writer(io, &buf);
         try it.streamRemaining(file, &file_writer.interface);
         try file_writer.interface.flush();
@@ -118,8 +118,8 @@ try std.tar.pipeToFileSystem(std.Io.Dir.cwd(), &reader, .{
 ### From File
 
 ```zig
-const file = try std.Io.Dir.cwd().openFile("archive.tar", .{});
-defer file.close();
+const file = try std.Io.Dir.cwd().openFile(io, "archive.tar", .{});
+defer file.close(io);
 
 var buf: [4096]u8 = undefined;
 var file_reader = file.reader(io, &buf);
@@ -179,21 +179,23 @@ const tar_bytes = output.written();
 ### Writing from File
 
 ```zig
-var output_file = try std.Io.Dir.cwd().createFile("archive.tar", .{});
-defer output_file.close();
+var output_file = try std.Io.Dir.cwd().createFile(io, "archive.tar", .{});
+defer output_file.close(io);
 var buf: [4096]u8 = undefined;
 var file_writer = output_file.writer(io, &buf);
 
 var w: std.tar.Writer = .{ .underlying_writer = &file_writer.interface };
 
 // Write file from disk
-var src_file = try std.Io.Dir.cwd().openFile("data.txt", .{});
-defer src_file.close();
+var src_file = try std.Io.Dir.cwd().openFile(io, "data.txt", .{});
+defer src_file.close(io);
 var src_buf: [4096]u8 = undefined;
 var src_reader = src_file.reader(io, &src_buf);
-const stat = try src_file.stat();
+const stat = try src_file.stat(io);
+// Stat.mtime is `Io.Timestamp` (nanoseconds); writeFile wants POSIX seconds.
+const mtime_secs: u64 = @intCast(@divTrunc(stat.mtime.nanoseconds, std.time.ns_per_s));
 
-try w.writeFile("data.txt", &src_reader, stat.mtime);
+try w.writeFile("data.txt", &src_reader, mtime_secs);
 
 try file_writer.interface.flush();
 ```
@@ -361,7 +363,7 @@ fn listTar(allocator: Allocator, tar_data: []const u8) !void {
 ### Create Archive from Directory
 
 ```zig
-fn createTarFromDir(allocator: Allocator, source_dir: std.Io.Dir, root_name: []const u8) ![]u8 {
+fn createTarFromDir(io: std.Io, allocator: Allocator, source_dir: std.Io.Dir, root_name: []const u8) ![]u8 {
     var output: std.Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
 
@@ -375,17 +377,18 @@ fn createTarFromDir(allocator: Allocator, source_dir: std.Io.Dir, root_name: []c
         switch (entry.kind) {
             .directory => try w.writeDir(entry.path, .{}),
             .file => {
-                var file = try entry.dir.openFile(entry.basename, .{});
-                defer file.close();
+                var file = try entry.dir.openFile(io, entry.basename, .{});
+                defer file.close(io);
                 var buf: [4096]u8 = undefined;
                 var file_reader = file.reader(io, &buf);
-                const stat = try file.stat();
-                try w.writeFile(entry.path, &file_reader, stat.mtime);
+                const stat = try file.stat(io);
+                const mtime_secs: u64 = @intCast(@divTrunc(stat.mtime.nanoseconds, std.time.ns_per_s));
+                try w.writeFile(entry.path, &file_reader, mtime_secs);
             },
             .sym_link => {
                 var link_buf: [std.fs.max_path_bytes]u8 = undefined;
-                const target = try entry.dir.readLink(entry.basename, &link_buf);
-                try w.writeLink(entry.path, target, .{});
+                const len = try entry.dir.readLink(io, entry.basename, &link_buf);
+                try w.writeLink(entry.path, link_buf[0..len], .{});
             },
             else => {},  // skip special files
         }

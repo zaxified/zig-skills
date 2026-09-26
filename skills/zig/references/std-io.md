@@ -328,8 +328,8 @@ var limited = r.limited(.limited(1024), &limited_buf);
 
 ### Reading Files
 ```zig
-const file = try std.Io.Dir.cwd().openFile("data.txt", .{});
-defer file.close();
+const file = try std.Io.Dir.cwd().openFile(io, "data.txt", .{});
+defer file.close(io);
 
 var buf: [4096]u8 = undefined;
 var reader = file.reader(io, &buf);
@@ -344,8 +344,8 @@ while (try r.takeDelimiter('\n')) |line| {
 
 ### Writing Files
 ```zig
-const file = try std.Io.Dir.cwd().createFile("out.txt", .{});
-defer file.close();
+const file = try std.Io.Dir.cwd().createFile(io, "out.txt", .{});
+defer file.close(io);
 
 var buf: [4096]u8 = undefined;
 var writer = file.writer(io, &buf);
@@ -447,9 +447,9 @@ defer _ = gpa.deinit();
 
 ### Process Lines from File
 ```zig
-fn processLines(path: []const u8) !void {
-    const file = try std.Io.Dir.cwd().openFile(path, .{});
-    defer file.close();
+fn processLines(io: std.Io, path: []const u8) !void {
+    const file = try std.Io.Dir.cwd().openFile(io, path, .{});
+    defer file.close(io);
 
     var buf: [8192]u8 = undefined;
     var reader = file.reader(io, &buf);
@@ -464,12 +464,12 @@ fn processLines(path: []const u8) !void {
 
 ### Copy File
 ```zig
-fn copyFile(src_path: []const u8, dst_path: []const u8) !void {
-    const src = try std.Io.Dir.cwd().openFile(src_path, .{});
-    defer src.close();
+fn copyFile(io: std.Io, src_path: []const u8, dst_path: []const u8) !void {
+    const src = try std.Io.Dir.cwd().openFile(io, src_path, .{});
+    defer src.close(io);
 
-    const dst = try std.Io.Dir.cwd().createFile(dst_path, .{});
-    defer dst.close();
+    const dst = try std.Io.Dir.cwd().createFile(io, dst_path, .{});
+    defer dst.close(io);
 
     var read_buf: [4096]u8 = undefined;
     var reader = src.reader(io, &read_buf);

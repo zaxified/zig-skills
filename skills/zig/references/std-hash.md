@@ -436,15 +436,17 @@ fn hashPair(comptime T: type, a: T, b: T) u64 {
 ### File Checksum
 
 ```zig
-fn checksumFile(path: []const u8) !u32 {
-    const file = try std.Io.Dir.cwd().openFile(path, .{});
-    defer file.close();
+fn checksumFile(io: std.Io, path: []const u8) !u32 {
+    const file = try std.Io.Dir.cwd().openFile(io, path, .{});
+    defer file.close(io);
 
     var crc = std.hash.Crc32.init();
-    var buf: [4096]u8 = undefined;
+    var file_buf: [4096]u8 = undefined;
+    var file_reader = file.reader(io, &file_buf);
 
+    var buf: [4096]u8 = undefined;
     while (true) {
-        const n = try file.read(&buf);
+        const n = try file_reader.interface.readSliceShort(&buf);
         if (n == 0) break;
         crc.update(buf[0..n]);
     }

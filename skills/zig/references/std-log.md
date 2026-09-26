@@ -105,7 +105,7 @@ pub const std_options: std.Options = .{
 
 fn myLogFn(
     comptime level: std.log.Level,
-    comptime scope: @Type(.enum_literal),
+    comptime scope: @EnumLiteral(),
     comptime format: []const u8,
     args: anytype,
 ) void {
@@ -146,7 +146,7 @@ fn process() void {
     }
 
     // For default scope
-    if (std.log.defaultLogEnabled(.debug)) {
+    if (std.log.logEnabled(.debug, .default)) {
         std.log.debug("Debug message", .{});
     }
 }
@@ -171,7 +171,7 @@ Forward to the standard implementation:
 ```zig
 fn myLogFn(
     comptime level: std.log.Level,
-    comptime scope: @Type(.enum_literal),
+    comptime scope: @EnumLiteral(),
     comptime format: []const u8,
     args: anytype,
 ) void {
@@ -217,11 +217,13 @@ fn processItem(item: Item) void {
 ### Error Context Logging
 
 ```zig
-fn loadConfig(path: []const u8) !Config {
-    return std.Io.Dir.cwd().openFile(path, .{}) catch |err| {
+fn loadConfig(io: std.Io, path: []const u8) !Config {
+    const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch |err| {
         log.err("Failed to open config '{s}': {s}", .{path, @errorName(err)});
         return err;
     };
+    defer file.close(io);
+    // ... read and parse `file` into a `Config`
 }
 ```
 
@@ -240,22 +242,25 @@ pub const log = std.log.scoped(.my_lib);
 ```zig
 fn fileLogFn(
     comptime level: std.log.Level,
-    comptime scope: @Type(.enum_literal),
+    comptime scope: @EnumLiteral(),
     comptime format: []const u8,
     args: anytype,
 ) void {
-    const file = std.Io.Dir.cwd().openFile("app.log", .{ .mode = .write_only }) catch return;
-    defer file.close();
-    file.seekFromEnd(0) catch return;
+    // No `Io` parameter is available in this signature (it must match
+    // `std.options.logFn`); use the global debug I/O instance, same as
+    // `std.log.defaultLog`.
+    const io = std.Options.debug_io;
+    const file = std.Io.Dir.cwd().openFile(io, "app.log", .{ .mode = .write_only }) catch return;
+    defer file.close(io);
+    const stat = file.stat(io) catch return;  // append: write at current end-of-file
 
     var buf: [256]u8 = undefined;
-    var writer = file.writer(io, &buf);
-    const w = &writer.interface;
+    var w: std.Io.Writer = .fixed(&buf);
 
     const level_txt = comptime level.asText();
     const scope_txt = if (scope == .default) "" else "(" ++ @tagName(scope) ++ ")";
 
     w.print("[{s}]{s} " ++ format ++ "\n", .{level_txt, scope_txt} ++ args) catch return;
-    w.flush() catch return;
+    file.writePositionalAll(io, w.buffered(), stat.size) catch return;
 }
 ```

@@ -32,10 +32,38 @@ BAD_MARK = re.compile(
     r"WRONG|\bBAD\b|compile error|❌|removed|REMOVED|0\.1[45]|old API|deprecated|Before|OLD",
 )
 # A line that marks everything after it inside the block as wrong / correct.
-WRONG_LINE = re.compile(r"//.*(WRONG|\bBAD\b|❌|removed|0\.1[45]|OLD|[Oo]ld:|[Bb]efore)")
-RIGHT_LINE = re.compile(r"//.*(CORRECT|GOOD|✅|0\.16|[Nn]ew:|[Aa]fter)")
+# Section markers count only at the start of a comment ("// WRONG (0.15)",
+# "// Before:"). Anywhere in the comment, a word like "before" in ordinary
+# prose silently switched off checking for the rest of the block.
+WRONG_LINE = re.compile(r"^\s*//+\s*(?:[-*(\[]\s*)?(WRONG|BAD\b|❌|OLD\b|Old\b|Before\b|0\.1[45]\b|Removed\b|removed\b|Deprecated\b)")
+RIGHT_LINE = re.compile(r"^\s*//+\s*(?:[-*(\[]\s*)?(CORRECT|GOOD\b|✅|0\.16\b|New\b|After\b|Now\b)")
 # Paths that only exist on another OS, target or behind a build option.
 IGNORE = re.compile(r"^(os\.windows|os\.wasi|os\.uefi|os\.plan9|Target\.\w+\.cpu)")
+
+
+# A whole section can be old code: "## TCP Server (0.15.x, removed in 0.16)".
+# Only an explicit word inside the heading's parentheses counts: a bare
+# "(0.15.x)" in this skill usually means "introduced in 0.15, still valid".
+OLD_HEADING = re.compile(r"^#{1,6}\s.*\(\s*0\.1[45][^)]*\bremoved\b[^)]*\)|^#{1,6}\s.*\(\s*deprecated\s*\)|^#{1,6}\s+Old API\b", re.I)
+
+
+def in_old_section(text, pos):
+    """True if any heading enclosing pos (nearest one per level) marks it as old code."""
+    level = 7
+    for line in reversed(text[:pos].split("\n")):
+        m = re.match(r"^(#{1,6})\s", line)
+        if m and len(m.group(1)) < level:
+            if OLD_HEADING.match(line):
+                return True
+            level = len(m.group(1))
+            if level == 1:
+                break
+    return False
+
+
+def skip_block(text, m):
+    before = text[: m.start()].rstrip("\n").split("\n")[-1]
+    return bool(BAD_MARK.search(before)) or in_old_section(text, m.start())
 
 
 def usable_lines(block):
@@ -79,8 +107,7 @@ def arity_findings():
     for f in sorted(glob.glob(os.path.join(SKILL, "**", "*.md"), recursive=True)):
         text = open(f, encoding="utf-8").read()
         for m in BLOCK.finditer(text):
-            before = text[max(0, text.rfind("\n", 0, m.start() - 1) - 300) : m.start()]
-            if BAD_MARK.search(before.splitlines()[-1] if before.splitlines() else ""):
+            if skip_block(text, m):
                 continue
             line0 = text.count("\n", 0, m.start()) + 2
             for line in usable_lines(m.group(1)):
@@ -100,8 +127,7 @@ def collect():
     for f in sorted(glob.glob(os.path.join(SKILL, "**", "*.md"), recursive=True)):
         text = open(f, encoding="utf-8").read()
         for m in BLOCK.finditer(text):
-            before = text[max(0, text.rfind("\n", 0, m.start() - 1) - 300) : m.start()]
-            if BAD_MARK.search(before.splitlines()[-1] if before.splitlines() else ""):
+            if skip_block(text, m):
                 continue
             line0 = text.count("\n", 0, m.start()) + 2
             for line in usable_lines(m.group(1)):

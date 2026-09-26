@@ -38,7 +38,7 @@ std.process.Args     // command-line argument access (was std.os.argv)
 
 ```zig
 // High-level (recommended for most code)
-const file = try std.Io.Dir.cwd().openFile("data.txt", .{});
+const file = try std.Io.Dir.cwd().openFile(io, "data.txt", .{});
 
 // POSIX-level (cross-platform low-level) — 0.16: std.posix.open is gone, use openat with AT.FDCWD
 const fd = try std.posix.openat(std.posix.AT.FDCWD, "data.txt", .{}, 0);
