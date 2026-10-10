@@ -13,7 +13,7 @@ and CLI options, target, the `build.zig` sources, declared dependencies — is u
 variable keeps building the old graph after that input changes. Measured on 0.17.0 with a
 `build.zig` that counted the entries of a directory and read an env var into `b.addOptions()`:
 a file added to the directory and the variable changed from `one` to `two` were both ignored,
-with no warning; `--cache-poison=disallowed` did not catch it because the configurer never ran.
+silently; `--cache-poison=disallowed` did not catch it because the configurer never ran.
 
 ```zig
 // Directory and file inputs: declare them.
