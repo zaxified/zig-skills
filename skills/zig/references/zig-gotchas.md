@@ -163,7 +163,7 @@ o.* = .{ .b = v };
 
 ### `getSymbols` with a stack-tracing allocator deadlocks
 
-New in 0.17.0 (measured): `std.debug.SelfInfo.getSymbols` takes the debug-info lock
+Measured on 0.16.0 and 0.17.0: `std.debug.SelfInfo.getSymbols` takes the debug-info lock
 exclusively and then allocates. If the allocator records a stack trace per allocation — a
 `SafeAllocator` in Debug, which is what `init.gpa` and `std.testing.allocator` are — that
 allocation unwinds the stack, which needs the same lock: the process hangs on a futex. Pass

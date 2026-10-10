@@ -515,7 +515,7 @@ Structured error collection for compiler diagnostics.
 ```zig
 const ErrorBundle = std.zig.ErrorBundle;
 
-// Create error bundle from AST errors
+// Create error bundle from AST errors (only when tree.errors.len > 0: it asserts there is one)
 var wip_errors: ErrorBundle.Wip = try .init(allocator);
 defer wip_errors.deinit();
 
