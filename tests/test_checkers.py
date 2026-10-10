@@ -103,6 +103,12 @@ class Deprecated(unittest.TestCase):
     def test_member_only_when_unique(self):
         self.assertEqual(self.hit("if (list.getLastOrNull()) |x| {}")[0], ".getLastOrNull")
 
+    def test_language_rules_follow_the_zig_version(self):
+        # 0.17 removals are not findings on 0.16; @Type was removed in 0.16.
+        self.assertIsNone(deprecated.line_hit("const n = @intFromEnum(e);", self.q, self.m, (0, 16)))
+        self.assertIsNotNone(deprecated.line_hit("const n = @intFromEnum(e);", self.q, self.m, (0, 17)))
+        self.assertIsNotNone(deprecated.line_hit("const T = @Type(.{ .int = x });", self.q, self.m, (0, 16)))
+
     def test_language_rules(self):
         bad = ["const z = [_]u8{0} ** 16;", 'const s = "ab" ** 3;', "errdefer |err| log(err);",
                "const v = void{};", "const x: i0 = 0;", "const c = @cImport(@cInclude(\"a.h\"));",

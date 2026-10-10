@@ -50,12 +50,14 @@ GUARD = re.compile(r'@compileError\("not testing"\)')
 REMOVED = re.compile(r"\s*(?::[^=]*)?=\s*@compileError\(")
 
 
-def std_dir(zig):
+def zig_env(zig):
+    """(std_dir, (major, minor)) of the given Zig."""
     out = subprocess.run([zig, "env"], capture_output=True, text=True, check=True).stdout
     m = re.search(r'\.std_dir\s*=\s*"([^"]+)"', out) or re.search(r'"std_dir"\s*:\s*"([^"]+)"', out)
-    if not m:
-        sys.exit("cannot find std_dir in `zig env`")
-    return m.group(1)
+    v = re.search(r'\.?"?version"?\s*[=:]\s*"(\d+)\.(\d+)', out)
+    if not m or not v:
+        sys.exit("cannot find std_dir and version in `zig env`")
+    return m.group(1), (int(v.group(1)), int(v.group(2)))
 
 
 def module_of(std, f):
@@ -109,32 +111,34 @@ MEMBER = re.compile(r"(?<!\.)[.@]([A-Za-z_]\w*)")
 
 # Language changes of 0.17.0 that the std source cannot show (release notes,
 # "Language Changes"). Each was confirmed by compiling it on 0.17.0.
-LANGUAGE = [
-    (re.compile(r"[}\]]\s*\*\*\s*[\w(]|\"\s*\*\*\s*\d"), "array repetition `**` was removed; use @splat"),
-    (re.compile(r"\berrdefer\s*\|"), "`errdefer |err|` capture was removed; catch in a wrapper function"),
-    (re.compile(r"\bvoid\{\}"), "`void{}` was removed; use `{}`"),
-    (re.compile(r"(?<![\w.])i0\b"), "`i0` was removed; use `u0`"),
-    (re.compile(r"@cImport\b"), "@cImport was removed; use the translate-c package"),
-    (re.compile(r"@Type\("), "@Type was removed (already in 0.16); use @Int, @Struct, @Union, @Enum, @Pointer, @Fn, @Tuple"),
-    (re.compile(r"@(intFromEnum|enumFromInt)\b"), "deprecated; use @backingInt / @fromBackingInt"),
+LANGUAGE = [  # (since, regex, note): checked only when the installed Zig is at least `since`
+    ((0, 17), re.compile(r"[}\]]\s*\*\*\s*[\w(]|\"\s*\*\*\s*\d"), "array repetition `**` was removed; use @splat"),
+    ((0, 17), re.compile(r"\berrdefer\s*\|"), "`errdefer |err|` capture was removed; catch in a wrapper function"),
+    ((0, 17), re.compile(r"\bvoid\{\}"), "`void{}` was removed; use `{}`"),
+    ((0, 17), re.compile(r"(?<![\w.])i0\b"), "`i0` was removed; use `u0`"),
+    ((0, 17), re.compile(r"@cImport\b"), "@cImport was removed; use the translate-c package"),
+    ((0, 16), re.compile(r"@Type\("), "@Type was removed (already in 0.16); use @Int, @Struct, @Union, @Enum, @Pointer, @Fn, @Tuple"),
+    ((0, 17), re.compile(r"@(intFromEnum|enumFromInt)\b"), "deprecated; use @backingInt / @fromBackingInt"),
     # std.lang.Type is struct-of-arrays in 0.17 for struct, union, enum, fn, opaque and
     # error sets, and Pointer/Fn flags moved into `attrs` (diffed field by field, 0.16 vs 0.17).
-    (re.compile(r'@"(?:struct|union|enum)"\.fields\b'), "type info is struct-of-arrays: field_names, field_types/field_values, field_attrs"),
-    (re.compile(r'(?:@"(?:struct|union|enum|opaque)"|\binfo)\.decls\b'), "type info has decl_names instead of decls"),
-    (re.compile(r"\.(?:is_exhaustive|is_var_args|calling_convention|is_allowzero|is_volatile|address_space)\b"),
+    ((0, 17), re.compile(r'@"(?:struct|union|enum)"\.fields\b'), "type info is struct-of-arrays: field_names, field_types/field_values, field_attrs"),
+    ((0, 17), re.compile(r'(?:@"(?:struct|union|enum|opaque)"|\binfo)\.decls\b'), "type info has decl_names instead of decls"),
+    ((0, 17), re.compile(r"\.(?:is_exhaustive|is_var_args|calling_convention|is_allowzero|is_volatile|address_space)\b"),
      "type info: enum .mode, fn .attrs.varargs / .attrs.@\"callconv\", pointer .attrs.@\"allowzero\"/@\"volatile\"/@\"addrspace\""),
-    (re.compile(r'@"fn"\.params\b|\.pointer\.(?:is_const|alignment)\b'), "type info: fn param_types/param_attrs, pointer .attrs.@\"const\"/@\"align\""),
-    (re.compile(r"\.linkage\s*=\s*\.(?:internal|link_once)\b"), "GlobalLinkage .internal and .link_once were removed"),
+    ((0, 17), re.compile(r'@"fn"\.params\b|\.pointer\.(?:is_const|alignment)\b'), "type info: fn param_types/param_attrs, pointer .attrs.@\"const\"/@\"align\""),
+    ((0, 17), re.compile(r"\.linkage\s*=\s*\.(?:internal|link_once)\b"), "GlobalLinkage .internal and .link_once were removed"),
     # @import("builtin") is generated, not in the std tree: its cpu/os/abi/object_format
     # shortcuts are deprecated in 0.17.0 (removed in 0.18.0).
-    (re.compile(r"(?<!std\.)\bbuiltin\.(?:cpu|os|abi|object_format)\b"), "deprecated; use builtin.target.cpu / .os / .abi / .ofmt"),
-    (re.compile(r"\bb\.(?:args|build_root)\b"), "b.args is gone (run.addPassthruArgs()); b.build_root is b.root"),
+    ((0, 17), re.compile(r"(?<!std\.)\bbuiltin\.(?:cpu|os|abi|object_format)\b"), "deprecated; use builtin.target.cpu / .os / .abi / .ofmt"),
+    ((0, 17), re.compile(r"\bb\.(?:args|build_root)\b"), "b.args is gone (run.addPassthruArgs()); b.build_root is b.root"),
 ]
 
 
-def line_hit(code, qualified, member):
+def line_hit(code, qualified, member, version=(99, 0)):
     """(name, note) of the first deprecated or removed use in one line of code, or None."""
-    for rx, note in LANGUAGE:
+    for since, rx, note in LANGUAGE:
+        if version < since:
+            continue
         m = rx.search(code)
         if m:
             return m.group(0).strip(), ("language", note)
@@ -150,7 +154,7 @@ def line_hit(code, qualified, member):
     return None
 
 
-def findings(qualified, member):
+def findings(qualified, member, version):
     out = []
     for f in sorted(glob.glob(os.path.join(paths.SKILL, "**", "*.md"), recursive=True)):
         with open(f, encoding="utf-8") as fh:
@@ -160,7 +164,7 @@ def findings(qualified, member):
                 continue
             line0 = text.count("\n", 0, m.start()) + 2
             for line in paths.usable_lines(m.group(1)):
-                hit = line_hit(line.split("//")[0], qualified, member)
+                hit = line_hit(line.split("//")[0], qualified, member, version)
                 if hit:
                     name, (note, std_where) = hit
                     out.append(f"{os.path.relpath(f, ROOT)}:{line0}: {name} ({std_where}: {note}) :: {line.strip()[:70]}")
@@ -172,14 +176,15 @@ def main():
     ap.add_argument("--zig", default="zig")
     ap.add_argument("--list", action="store_true", help="print the deprecated-name table and exit")
     a = ap.parse_args()
-    qualified, member = scan_std(std_dir(a.zig))
+    std, version = zig_env(a.zig)
+    qualified, member = scan_std(std)
     if a.list:
         for (mod, name), (note, where) in sorted(qualified.items()):
             print(f"std.{mod + '.' if mod else ''}{name}\t{where}\t{note}")
         for name, (note, where) in sorted(member.items()):
             print(f".{name}\t{where}\t{note}")
         return 0
-    out = findings(qualified, member)
+    out = findings(qualified, member, version)
     for o in out:
         print(o)
     print(f"{len(qualified)} qualified + {len(member)} member names, {len(out)} use(s) in correct code", file=sys.stderr)
