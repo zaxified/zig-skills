@@ -32,10 +32,13 @@ pub fn build(b: *std.Build) void {
   undeclared reads on a cache hit.
 - `zig build --print-configuration` prints the cached graph as ZON.
 - Paths: `b.build_root` → `b.root` (a `Cache.Path`; `b.root.root_dir.handle` is the `Dir`).
-  `b.cache_root` and `b.graph.global_cache_root` are gone. The global cache directory is set
-  with `ZIG_GLOBAL_CACHE_DIR` (there is no `--global-cache-dir` for `zig build` any more).
-- The first `zig build` after installing Zig compiles the maker once (about 110 s on an 8-core
-  x86_64 Linux machine).
+  `b.cache_root` and `b.graph.global_cache_root` are gone (a step can take
+  `std.Build.LazyPath.cache_root`). The global cache directory is set with
+  `ZIG_GLOBAL_CACHE_DIR`; `zig build` rejects `--global-cache-dir`.
+- `dependOnDirectoryContents` tracks added, removed and renamed entries, not their contents,
+  and is not recursive: declare each scanned directory.
+- The first `zig build` after installing Zig compiles the maker once (measured twice: 108 s
+  and 115 s, Zig 0.17.0, x86_64 Linux, 8-core machine).
 
 ## Critical: Compile Methods Moved to Module (0.16)
 

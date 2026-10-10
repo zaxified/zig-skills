@@ -52,7 +52,7 @@ ascii.startsWithIgnoreCase("Hello World", "hello")  // true
 ascii.endsWithIgnoreCase("Hello World", "WORLD")    // true
 
 // Search
-ascii.indexOfIgnoreCase("Hello World", "world")     // ?usize = 6
+ascii.findIgnoreCase("Hello World", "world")        // ?usize = 6 (0.17: indexOfIgnoreCase is gone)
 
 // Lexicographical order
 ascii.orderIgnoreCase("abc", "ABC")       // .eq

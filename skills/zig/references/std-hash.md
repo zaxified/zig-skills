@@ -196,15 +196,15 @@ Over 100 CRC variants available:
 ```zig
 const crc = std.hash.crc;
 
-// Common variants
-const Crc32IsoHdlc = crc.Crc32IsoHdlc;  // Standard CRC-32 (default)
-const Crc32Iscsi = crc.Crc32Iscsi;      // CRC-32C (Castagnoli)
-const Crc16Usb = crc.Crc16Usb;
-const Crc16Modbus = crc.Crc16Modbus;
-const Crc8Bluetooth = crc.Crc8Bluetooth;
+// 0.17: variants are named after the CRC catalogue (was crc.Crc32IsoHdlc, crc.Crc32Iscsi, ...)
+const Crc32IsoHdlc = crc.@"CRC-32/ISO-HDLC"; // Standard CRC-32 (= std.hash.Crc32)
+const Crc32Iscsi = crc.@"CRC-32/ISCSI";      // CRC-32C (Castagnoli)
+const Crc16Usb = crc.@"CRC-16/USB";
+const Crc16Modbus = crc.@"CRC-16/MODBUS";
+const Crc8Bluetooth = crc.@"CRC-8/BLUETOOTH";
 
 // Usage
-const checksum = crc.Crc32Iscsi.hash("data");
+const checksum = Crc32Iscsi.hash("data");
 ```
 
 ### Custom CRC

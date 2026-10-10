@@ -1,4 +1,4 @@
-# std.ArrayHashMap (0.16)
+# std.ArrayHashMap (0.17)
 
 A hash map that preserves insertion order and stores keys/values in contiguous arrays. Combines hash table lookup with array-like iteration.
 

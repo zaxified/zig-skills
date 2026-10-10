@@ -109,8 +109,12 @@ const Level = enum {
 For faster compression without LZ77 match searching:
 
 ```zig
-const HuffmanEncoder = flate.HuffmanEncoder;
-// Used internally for Huffman-only encoding (bigger output, faster compression)
+// flate.Compress.Huffman: Huffman coding only (bigger output, faster compression).
+// `output_writer` must have a buffer of more than 8 bytes (asserted).
+var buffer: [flate.max_window_len]u8 = undefined;
+var huffman: flate.Compress.Huffman = try .init(output_writer, &buffer, .gzip);
+try huffman.writer.writeAll(data);
+try huffman.finish(); // writes the final block and the gzip footer; flush() alone does not
 ```
 
 ## Zstandard

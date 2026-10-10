@@ -78,13 +78,13 @@ const linux = std.os.linux;
 const addr = linux.mmap(
     null,
     length,
-    linux.PROT.READ | linux.PROT.WRITE,
+    .{ .READ = true, .WRITE = true }, // linux.PROT is a packed struct of flags
     .{ .TYPE = .PRIVATE, .ANONYMOUS = true },
     -1,
     0,
 );
-if (addr == linux.MAP_FAILED) {
-    // handle error
+if (linux.errno(addr) != .SUCCESS) {
+    // handle error (raw syscalls return -errno in a usize)
 }
 
 // Remap
@@ -148,8 +148,8 @@ const linux = std.os.linux;
 // Signal handling
 var act: linux.Sigaction = .{
     .handler = .{ .handler = signal_handler },
-    .mask = linux.empty_sigset,
-    .flags = .{},
+    .mask = linux.sigemptyset(),
+    .flags = 0,
 };
 _ = linux.sigaction(linux.SIG.INT, &act, null);
 

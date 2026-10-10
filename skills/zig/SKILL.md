@@ -1,6 +1,6 @@
 ---
 name: zig-0.17
-description: "Zig 0.17.0 patterns, checked against the released standard library. Use when writing, reviewing, or debugging Zig code for Zig 0.17.x (zig version / minimum_zig_version in build.zig.zon; a 0.16 project uses the zig skill instead), build.zig and build.zig.zon files, or comptime metaprogramming. Covers the 0.17 changes: array ** removed (@splat), errdefer capture and @cImport removed (translate-c package), @intFromEnum to @backingInt, struct-of-arrays @typeInfo (field_names, field_types), @bitCast on extern structs, @hasDecl pub-only, std.builtin to std.lang with .debug/.safe/.fast/.small, SafeAllocator and BufferFirstAllocator, Allocator.print and mem.print, mem.find, zon.parse with an arena, HostName.fromUri, b.args to addPassthruArgs, the configurer/maker build split and zig-pkg/. Also prevents older patterns from training data: the std.Io instance threaded through files, sockets, clocks and locks (std.fs to std.Io.Dir/File, std.net to std.Io.net, std.time timestamps and Timer to std.Io.Clock, std.Thread.Mutex/Condition/Pool to std.Io.Mutex/Condition/Group, std.crypto.random to io.randomSecure), main(init: std.process.Init), build system APIs (root_module, Compile methods to Module methods), buffered Reader/Writer with flush, container initialization (.empty/.init), unmanaged ArrayList and HashMap, lowercase @typeInfo tags, removed async/await and usingnamespace; plus gotchas found in production code."
+description: "Zig 0.17.0 patterns, checked against the released standard library. Use when writing, reviewing, or debugging Zig code for Zig 0.17.x (zig version / minimum_zig_version in build.zig.zon; a 0.16 project uses the zig skill instead), build.zig and build.zig.zon files, or comptime metaprogramming. Covers the 0.17 changes: array ** removed (@splat), errdefer capture and @cImport removed (translate-c package), @intFromEnum to @backingInt, struct-of-arrays @typeInfo (field_names, field_types), @bitCast on extern structs, @hasDecl pub-only, std.builtin to std.lang with .debug/.safe/.fast/.small, SafeAllocator and BufferFirstAllocator, Allocator.print and mem.print, mem.find, zon.parse with an arena, HostName.fromUri, b.args to addPassthruArgs, the configurer/maker build split with its cached configuration (undeclared configure-time reads go stale: dependOnDirectoryContents, poisonCache), optimize-mode spellings on the CLI, incremental builds with the self-hosted backend, and zig-pkg/. Also prevents older patterns from training data: the std.Io instance threaded through files, sockets, clocks and locks (std.fs to std.Io.Dir/File, std.net to std.Io.net, std.time timestamps and Timer to std.Io.Clock, std.Thread.Mutex/Condition/Pool to std.Io.Mutex/Condition/Group, std.crypto.random to io.randomSecure), main(init: std.process.Init), build system APIs (root_module, Compile methods to Module methods), buffered Reader/Writer with flush, container initialization (.empty/.init), unmanaged ArrayList and HashMap, lowercase @typeInfo tags, removed async/await and usingnamespace; plus gotchas found in production code."
 license: MIT
 compatibility:
   - claude-code
@@ -153,25 +153,27 @@ if (b.args) |args| run_cmd.addArgs(args);
 run_cmd.addPassthruArgs();   // forwards `zig build run -- a b c`
 ```
 - `zig build` runs `build.zig` in a separate *configurer* process; a cached *maker* executes the
-  graph. The first `zig build` after installing Zig compiles the maker (measured: 108–115 s
-  on an 8-core x86_64 Linux machine; once per toolchain and global cache — cache
-  `ZIG_GLOBAL_CACHE_DIR` in CI). Later runs skip `build.zig` entirely when the configuration
-  key is unchanged (measured: 15 ms for `zig build --help`).
+  graph. The first `zig build` after installing Zig compiles the maker (measured twice: 108 s
+  and 115 s; Zig 0.17.0, x86_64 Linux, 8-core machine; once per toolchain and global cache — keep
+  `ZIG_GLOBAL_CACHE_DIR` cached in CI). Later runs skip `build.zig` entirely when the
+  configuration key is unchanged (`zig build --help` then took 15 ms, same machine).
 - **The configuration is cached, and only declared inputs invalidate it.** The key is the
   `-D`/CLI options, the target and the `build.zig` sources. A `build.zig` that reads a
   directory, a file or an environment variable at configure time keeps the old result after
-  that input changes — measured: a new file in a scanned directory and a changed env var were
-  both ignored, silently, and `--cache-poison=disallowed` did not notice (the configurer never
-  ran). Declare files and directories with `b.dependOnFileContents` /
-  `dependOnDirectoryContents` (or `*Metadata`); there is no declaration for environment
+  that input changes — measured on 0.17.0 with a `build.zig` that counted the entries of a
+  directory and read an env var into `b.addOptions()`: adding a file and changing the variable
+  were both ignored, silently, and `--cache-poison=disallowed` did not notice (the configurer
+  never ran). Declare files and directories with `b.dependOnFileContents` /
+  `dependOnDirectoryContents` (or `*Metadata`; the directory form tracks added, removed and
+  renamed entries, not their contents, and is not recursive); there is no declaration for environment
   variables — turn them into `-D` options, or call `b.graph.poisonCache()` after reading one
   (configuration then reruns on every invocation). `zig build --cache-poison=poisoned` forces
   one rerun.
-- `zig build` CLI: `--global-cache-dir` is gone (use the `ZIG_GLOBAL_CACHE_DIR` environment
-  variable), `--zig-lib-dir` → `--zig-lib=`, `--build-runner`, `--debug-rt` and
-  `--verbose-llvm-bc` are gone. New: `--print-configuration`, `--cache-poison`, `--listen=-`.
-  `b.cache_root` and `b.graph.global_cache_root` no longer exist (configure logic cannot see
-  cache paths).
+- `zig build` rejects (measured, "unrecognized argument"): `--global-cache-dir` (use the
+  `ZIG_GLOBAL_CACHE_DIR` environment variable), `--zig-lib-dir` (now `--zig-lib=`, which must
+  be the first argument), `--build-runner`, `--verbose-llvm-bc`. New: `--print-configuration`,
+  `--cache-poison`, `--listen=-`. `b.cache_root` and `b.graph.global_cache_root` no longer
+  exist; a step that needs the local cache directory gets `std.Build.LazyPath.cache_root`.
 - `b.build_root` → `b.root` (a `Cache.Path`); `LazyPath.getDisplayName()` → `"{f}"`.
 - Run step args: `addOutputFileArg(name)` → `addOutputFileArg2(name, .{})`, and the same `*Arg2(…,
   .{ .prefix = … })` scheme for artifact, file, directory, output-directory and dep-file args.
@@ -190,12 +192,16 @@ run_cmd.addPassthruArgs();   // forwards `zig build run -- a b c`
 ### Optimize modes and backends
 - **Both spellings work in 0.17, only the old ones in 0.16:** `-OReleaseSafe` / `-Osafe` for
   `zig test`/`build-exe`, `-Doptimize=ReleaseSafe` / `-Doptimize=safe` for `zig build`. A
-  script shared by 0.16 and 0.17 toolchains keeps the old names. Exception: `--release=safe`
-  accepts only the new names. In code, compare against `.debug`/`.safe`/`.fast`/`.small`.
+  script shared by 0.16 and 0.17 toolchains keeps the old names. Exception: `--release=`
+  accepts only the new names (`--release=ReleaseSafe` fails). Measured on 0.17.0 with
+  `zig test -OReleaseSafe`, `zig build run -Doptimize=ReleaseSafe` and `--release=…`;
+  0.16.0 rejects `-Osafe` ("unrecognized optimization mode"). In code, compare against
+  `.debug`/`.safe`/`.fast`/`.small`.
 - `builtin.mode` prints as `debug`, `safe`, … (`{t}`).
 - Debug on x86_64 Linux still uses the self-hosted backend; release modes use LLVM;
   `.use_llvm = true` on a compile step, or `-fllvm`, forces LLVM in Debug (unchanged).
-- `-fformatted-panics` / `-fno-formatted-panics` are gone.
+- `zig test` / `zig build-exe` reject `-fformatted-panics` / `-fno-formatted-panics`
+  ("unrecognized parameter", measured).
 
 ### Moving a 0.16 project
 1. Pin the toolchain (`minimum_zig_version = "0.17.0"`, CI) and cache the global cache in CI.
@@ -215,8 +221,9 @@ returns an error union).
 
 ### Incremental compilation
 `zig build -fincremental --watch` rebuilds on every save — but only the **self-hosted**
-backend compiles incrementally. Measured on a small project: self-hosted 479 ms first build,
-then 14 ms and 6 ms per edit; with `.use_llvm = true` every edit was a full 2–3 s rebuild.
+backend compiles incrementally. Measured on a 10-line program in Debug (Zig 0.17.0, x86_64 Linux, 8-core machine):
+self-hosted 479 ms for the first build, then 14 ms and 6 ms per edit; with `.use_llvm = true`
+every edit was a full 2–3 s rebuild.
 For the edit loop (and while ZLS does not work) run it with the self-hosted backend, e.g.
 `zig build -fincremental --watch -Dselfhosted=true` when the build exposes such an option;
 test with LLVM. There is no incremental mode without `--watch`.

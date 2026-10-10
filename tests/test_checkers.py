@@ -37,6 +37,18 @@ class Markers(unittest.TestCase):
         self.assertTrue(paths.in_old_section(text, blocks[0].start()))
         self.assertFalse(paths.in_old_section(text, blocks[1].start()))
 
+    def test_aliases_are_resolved_and_shadowed(self):
+        text = ("```zig\nconst ascii = std.ascii;\n```\n"
+                "```zig\nconst x = ascii.findIgnoreCase(a, b);\n```\n"
+                "```zig\nvar ascii = Local.init();\nascii.update(a);\n```\n"
+                "```zig\n// WRONG\nconst rnd = std.crypto.random;\n```\n")
+        table = paths.aliases(text)
+        self.assertEqual(table, {"ascii": ".ascii"})  # the WRONG block's alias does not count
+        self.assertEqual(paths.expand("ascii.findIgnoreCase(a)", table), "std.ascii.findIgnoreCase(a)")
+        self.assertEqual(paths.expand("my_ascii.x + .ascii.y", table), "my_ascii.x + .ascii.y")
+        shadowing = "var ascii = Local.init();\nascii.update(a);\n"
+        self.assertEqual(paths.block_table(shadowing, table), {})
+
     def test_io_arity(self):
         self.assertTrue(paths.IO_ARITY.search("file.close();"))
         self.assertTrue(paths.IO_ARITY.search("try std.Io.Dir.cwd().openFile(path, .{})"))

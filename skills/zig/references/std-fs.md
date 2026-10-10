@@ -46,12 +46,12 @@ const file = try std.Io.Dir.cwd().createFile(io, "output.txt", .{ .truncate = fa
 const file = try std.Io.Dir.cwd().createFile(io, "new.txt", .{ .exclusive = true });
 ```
 
-**OpenFlags** (`Dir.OpenFileOptions`):
+**`Dir.OpenFileOptions`**:
 - `.mode`: `.read_only` (default), `.write_only`, `.read_write`
 - `.lock`: `.none`, `.shared`, `.exclusive` (advisory locking)
 - `.lock_nonblocking`: return `error.WouldBlock` instead of waiting
 
-**CreateFlags** (`Dir.CreateFileOptions`):
+**`Dir.CreateFileOptions`**:
 - `.read`: enable read access (default: false)
 - `.truncate`: truncate if exists (default: true)
 - `.exclusive`: fail if exists (default: false)

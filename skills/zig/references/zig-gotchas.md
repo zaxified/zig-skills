@@ -10,13 +10,14 @@ wrong, slow, or leaks. They were found on 0.16.0; each entry says whether 0.17.0
 `zig build` caches what `build.zig` configured and skips the configurer when the key — `-D`
 and CLI options, target, the `build.zig` sources, declared dependencies — is unchanged. A
 `build.zig` that scans a directory (a module list), reads a file or reads an environment
-variable keeps building the old graph after that input changes. Measured on 0.17.0: a file
-added to a scanned directory and an env var changed from `one` to `two` were both ignored, with
-no warning; `--cache-poison=disallowed` did not catch it because the configurer never ran.
+variable keeps building the old graph after that input changes. Measured on 0.17.0 with a
+`build.zig` that counted the entries of a directory and read an env var into `b.addOptions()`:
+a file added to the directory and the variable changed from `one` to `two` were both ignored,
+with no warning; `--cache-poison=disallowed` did not catch it because the configurer never ran.
 
 ```zig
 // Directory and file inputs: declare them.
-b.dependOnDirectoryContents(b.path("modules"));    // entries added/removed/renamed
+b.dependOnDirectoryContents(b.path("modules"));    // entries added/removed/renamed; not recursive
 b.dependOnFileContents(b.path("modules.zon"));
 // Environment: no declaration exists. Prefer a -D option; otherwise
 const level = b.graph.environ_map.get("MY_LEVEL");
@@ -27,10 +28,10 @@ b.graph.poisonCache(); // configuration now reruns on every zig build
 forced with `zig build --cache-poison=poisoned`.
 
 ### `zig build` lost flags scripts use
-`--global-cache-dir` (use `ZIG_GLOBAL_CACHE_DIR`), `--zig-lib-dir` (now `--zig-lib=`),
-`--build-runner`, `--debug-rt`, `--verbose-llvm-bc`. `b.cache_root` and
-`b.graph.global_cache_root` are gone, so configure code can no longer hand cache paths to a
-child `zig`. `--release=ReleaseSafe` fails (`--release=safe`), while `-Doptimize=ReleaseSafe`
+Measured ("unrecognized argument"): `--global-cache-dir` (use `ZIG_GLOBAL_CACHE_DIR`),
+`--zig-lib-dir` (now `--zig-lib=`, first argument only), `--build-runner`, `--verbose-llvm-bc`.
+`b.cache_root` and `b.graph.global_cache_root` are gone, so configure code can no longer put a
+cache path into a string; a step can still take `std.Build.LazyPath.cache_root`. `--release=ReleaseSafe` fails (`--release=safe`), while `-Doptimize=ReleaseSafe`
 and `-OReleaseSafe` still work — keep the old spellings in scripts that must also run on 0.16.
 
 ### Silent behaviour changes
@@ -52,8 +53,8 @@ and `-OReleaseSafe` still work — keep the old spellings in scripts that must a
 ### Tooling
 - **ZLS does not work with 0.17.0** (the build runner it hooked into is gone). Editor
   diagnostics stay empty or stale; compile to see errors.
-- **The first `zig build` after installing 0.17 compiles the maker** (measured: about
-  115 s on an 8-core x86_64 Linux machine, once per toolchain and global cache). A fresh CI runner pays it on every job unless
+- **The first `zig build` after installing 0.17 compiles the maker** (measured twice:
+  108 s and 115 s, Zig 0.17.0, x86_64 Linux, 8-core machine; once per toolchain and global cache). A fresh CI runner pays it on every job unless
   the global cache (`~/.cache/zig`) is cached.
 - **Cache manifests in `.zig-cache/h/` are binary.** A script that parsed them as text (a
   coverage or cache-inspection tool) breaks; `zig cache-cat <path>` prints one as ZON.
@@ -220,8 +221,9 @@ The fuzzer explores raw bytes poorly; give harnesses a structured half built fro
 ### Two backends: self-hosted for the edit loop, LLVM for test runs
 
 Still true in 0.17.0. The timings below are from 0.16.0. New in 0.17: `-fincremental --watch`
-makes the self-hosted edit loop near-instant (measured 14 ms and 6 ms per edit of a small
-program), while an LLVM build gains nothing from it (a full 2–3 s rebuild per edit).
+makes the self-hosted edit loop near-instant (measured 14 ms and 6 ms per edit of a 10-line
+program, Zig 0.17.0, x86_64 Linux, 8-core machine), while an LLVM build gains nothing from it (a full 2–3 s
+rebuild per edit).
 
 A Debug build for x86_64 Linux uses the self-hosted backend; every Release mode, and Debug on
 most other targets, uses LLVM. `builtin.zig_backend` says which one built the code
