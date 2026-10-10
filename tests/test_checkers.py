@@ -111,14 +111,16 @@ class Deprecated(unittest.TestCase):
                'for (@typeInfo(E).@"enum".fields) |f| {}', 'inline for (@typeInfo(T).@"struct".decls) |d| {}',
                "if (info.is_exhaustive) {}", 'const ps = @typeInfo(F).@"fn".params;',
                "if (@typeInfo(P).pointer.is_const) {}",
-               "const T = @Type(.{ .int = .{ .signedness = .unsigned, .bits = 3 } });"]
+               "const T = @Type(.{ .int = .{ .signedness = .unsigned, .bits = 3 } });",
+               "if (builtin.os.tag == .windows) {}", "const a = builtin.cpu.arch;"]
         for code in bad:
             self.assertIsNotNone(self.hit(code), code)
         good = ["const z: [16]u8 = @splat(0);", "const p = a ** b;", "errdefer gpa.free(x);",
                 "const n = @backingInt(e);", 'inline for (info.field_names) |n| {}', "const u: u0 = 0;",
                 "run.addPassthruArgs();", ".linkage = .strong,",
                 'for (@typeInfo(E).@"enum".field_names) |n| {}', "if (info.mode == .exhaustive) {}",
-                'const c = @typeInfo(P).pointer.attrs.@"const";', "const a = std.mem.Alignment.of(T);"]
+                'const c = @typeInfo(P).pointer.attrs.@"const";', "const a = std.mem.Alignment.of(T);",
+                "if (builtin.target.os.tag == .windows) {}", "const m = builtin.mode;"]
         for code in good:
             self.assertIsNone(self.hit(code), code)
 

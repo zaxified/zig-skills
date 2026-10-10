@@ -534,7 +534,7 @@ stat.ctime;  // Io.Timestamp - status change time
 const builtin = @import("builtin");
 
 fn platformSpecific() !void {
-    switch (builtin.os.tag) {
+    switch (builtin.target.os.tag) {
         .linux => {
             const linux = std.os.linux;
             // Linux-specific code

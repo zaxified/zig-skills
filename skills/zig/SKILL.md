@@ -71,8 +71,10 @@ const v = {};       // i0 → u0
 ```
 
 `@cImport` is removed: translate C headers with the `translate-c` package
-(`zig fetch --save git+https://codeberg.org/ziglang/translate-c`, then
+(add it with `zig fetch --save` on a pinned ref — a release tag or commit of
+https://codeberg.org/ziglang/translate-c, not the moving default branch — then
 `@import("translate_c").Translator` in `build.zig`; `b.addTranslateC` is deprecated).
+Fetching needs the network: ask the user before adding the dependency.
 `GlobalLinkage` lost `.internal` and `.link_once` (use `.weak`, or simply do not `@export`).
 
 ### Enum ↔ integer: `@backingInt` / `@fromBackingInt`
@@ -149,7 +151,8 @@ if (b.args) |args| run_cmd.addArgs(args);
 run_cmd.addPassthruArgs();   // forwards `zig build run -- a b c`
 ```
 - `zig build` runs `build.zig` in a separate *configurer* process; a cached *maker* executes the
-  graph. The first `zig build` after installing Zig compiles the maker (about two minutes);
+  graph. The first `zig build` after installing Zig compiles the maker (measured: about 115 s
+  on an 8-core x86_64 Linux machine; once per toolchain and global cache);
   later runs skip `build.zig` entirely when the configuration is unchanged.
 - `b.build_root` → `b.root` (a `Cache.Path`); `LazyPath.getDisplayName()` → `"{f}"`.
 - Run step args: `addOutputFileArg(name)` → `addOutputFileArg2(name, .{})`, and the same `*Arg2(…,
@@ -623,8 +626,9 @@ Neither `.{}` nor a hand-written field literal initializes an `ArrayList`: 0.17 
 ### Naming Changes
 - **`std.ArrayListUnmanaged` -> `std.ArrayList`** (Unmanaged is now default, old name deprecated)
 - **`std.heap.GeneralPurposeAllocator` / `DebugAllocator` -> `std.heap.SafeAllocator`** (0.17;
-  `DebugAllocator` is deprecated). In `main(init: std.process.Init)` use `init.gpa`, which is a
-  `SafeAllocator` in debug/safe builds and `smp_allocator`/`c_allocator` in fast/small builds.
+  `DebugAllocator` is deprecated). In `main(init: std.process.Init)` use `init.gpa`: a `SafeAllocator` in Debug/ReleaseSafe
+  (and in ReleaseFast/Small when single-threaded without libc); otherwise `c_allocator` when
+  linking libc, `wasm_allocator` on wasm, `smp_allocator` elsewhere (`std/start.zig`).
 
 ### Linked Lists: Generic Parameter Removed
 ```zig
@@ -991,7 +995,7 @@ ZLS used; ZLS and Zig are moving it to the Build Server Protocol. Until a ZLS re
 # Download from https://github.com/zigtools/zls/releases
 # Or build from source:
 git clone https://github.com/zigtools/zls
-cd zls && git checkout 0.16.0  # match your Zig version
+cd zls && git checkout 0.16.0  # match your Zig version (no ZLS release supports 0.17.0 yet)
 zig build -Doptimize=ReleaseSafe
 
 # Configure:

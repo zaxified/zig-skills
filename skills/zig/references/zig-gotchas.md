@@ -24,8 +24,8 @@ wrong, slow, or leaks. They were found on 0.16.0; each entry says whether 0.17.0
 ### Tooling
 - **ZLS does not work with 0.17.0** (the build runner it hooked into is gone). Editor
   diagnostics stay empty or stale; compile to see errors.
-- **The first `zig build` after installing 0.17 compiles the maker** (measured about two
-  minutes, once per toolchain and global cache). A fresh CI runner pays it on every job unless
+- **The first `zig build` after installing 0.17 compiles the maker** (measured: about
+  115 s on an 8-core x86_64 Linux machine, once per toolchain and global cache). A fresh CI runner pays it on every job unless
   the global cache (`~/.cache/zig`) is cached.
 - **`ArrayList` gained `pointer_stability`** (a `std.debug.SafetyLock`). A field-by-field
   literal stops compiling; `.empty` and `initBuffer` are unaffected. `lockPointers()` /
@@ -307,12 +307,12 @@ const builtin = @import("builtin");
 
 /// The hardware path can be compiled at all: LLVM always, the self-hosted backend only when
 /// the target CPU model has the instruction.
-const pclmul_emittable = builtin.cpu.arch == .x86_64 and
+const pclmul_emittable = builtin.target.cpu.arch == .x86_64 and
     (builtin.zig_backend != .stage2_x86_64 or
-        std.Target.x86.featureSetHas(builtin.cpu.features, .pclmul));
+        std.Target.x86.featureSetHas(builtin.target.cpu.features, .pclmul));
 
 fn cpuHasPclmul() bool {
-    if (builtin.cpu.arch != .x86_64) return false;
+    if (builtin.target.cpu.arch != .x86_64) return false;
     var eax: u32 = undefined;
     var ebx: u32 = undefined;
     var ecx: u32 = undefined;

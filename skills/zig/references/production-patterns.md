@@ -367,8 +367,8 @@ const Impl = if (builtin.mode == .debug and !builtin.single_threaded)
 else
     ReleaseImpl;
 
-pub const ReleaseImpl = if (builtin.os.tag == .windows) WindowsImpl
-    else if (builtin.os.tag.isDarwin()) DarwinImpl
+pub const ReleaseImpl = if (builtin.target.os.tag == .windows) WindowsImpl
+    else if (builtin.target.os.tag.isDarwin()) DarwinImpl
     else FutexImpl;
 
 const DebugImpl = struct {
@@ -461,7 +461,7 @@ Single histogram pass amortizes cache misses. Skips passes where all items land 
 ### Explicit Error Sets per Method (Ghostty)
 
 ```zig
-pub const Pty = switch (builtin.os.tag) {
+pub const Pty = switch (builtin.target.os.tag) {
     .windows => WindowsPty,
     .ios => NullPty,
     else => PosixPty,
@@ -520,7 +520,7 @@ Catches struct layout bugs at compile time. Ensures deterministic serialization 
 ### OS-Specific Type Selection (Ghostty)
 
 ```zig
-pub const Pty = switch (builtin.os.tag) {
+pub const Pty = switch (builtin.target.os.tag) {
     .windows => WindowsPty,
     .ios => NullPty,
     else => PosixPty,
@@ -538,8 +538,8 @@ pub const setenv = env.setenv;
 pub const TempDir = @import("TempDir.zig");
 
 test {
-    if (comptime builtin.os.tag == .linux) _ = kernel_info;
-    if (comptime builtin.os.tag.isDarwin()) _ = macos;
+    if (comptime builtin.target.os.tag == .linux) _ = kernel_info;
+    if (comptime builtin.target.os.tag.isDarwin()) _ = macos;
 }
 ```
 
@@ -795,8 +795,8 @@ Fuzzes state machines with random operations and batch configurations. Seeded fo
 test {
     _ = i18n;
     _ = path;
-    if (comptime builtin.os.tag == .linux) _ = kernel_info;
-    if (comptime builtin.os.tag.isDarwin()) _ = macos;
+    if (comptime builtin.target.os.tag == .linux) _ = kernel_info;
+    if (comptime builtin.target.os.tag.isDarwin()) _ = macos;
 }
 ```
 

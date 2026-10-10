@@ -950,7 +950,7 @@ pub fn wrapper(fd: std.posix.fd_t, buf: []u8) !usize {
 const builtin = @import("builtin");
 
 fn platformSpecificCall() void {
-    switch (builtin.os.tag) {
+    switch (builtin.target.os.tag) {
         .linux => {
             // Linux uses c_int for some syscalls (builtin type, not std.c.c_int)
             const result: c_int = ...;

@@ -806,7 +806,7 @@ pub fn ArrayHashMap(comptime T: type) type {
 Select platform-specific implementations at compile time.
 
 ```zig
-const native_os = builtin.os.tag;
+const native_os = builtin.target.os.tag;
 const use_libc = builtin.link_libc;
 
 /// A libc-compatible API layer.

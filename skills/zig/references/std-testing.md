@@ -256,7 +256,7 @@ test "skip this" {
 }
 
 test "conditional skip" {
-    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    if (builtin.target.os.tag == .windows) return error.SkipZigTest;
     // ...
 }
 

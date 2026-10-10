@@ -717,7 +717,8 @@ Element-wise select: `pred[i] ? a[i] : b[i]`.
 C headers are translated by the `translate-c` package in `build.zig`, and the result is imported
 as an ordinary module:
 ```bash
-zig fetch --save git+https://codeberg.org/ziglang/translate-c
+# Pin a release tag or commit (`#<ref>`), not the moving default branch. Needs the network.
+zig fetch --save "git+https://codeberg.org/ziglang/translate-c#<ref>"
 ```
 ```zig
 // build.zig

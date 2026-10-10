@@ -230,7 +230,7 @@ fn process(comptime T: type, value: T) T {
 
 ```zig
 const builtin = @import("builtin");
-const native_endian = builtin.cpu.arch.endian();
+const native_endian = builtin.target.cpu.arch.endian();
 
 pub fn readIntBig(comptime T: type, bytes: []const u8) T {
     const value: T = @bitCast(bytes[0..@sizeOf(T)].*);

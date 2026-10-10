@@ -125,6 +125,9 @@ LANGUAGE = [
      "type info: enum .mode, fn .attrs.varargs / .attrs.@\"callconv\", pointer .attrs.@\"allowzero\"/@\"volatile\"/@\"addrspace\""),
     (re.compile(r'@"fn"\.params\b|\.pointer\.(?:is_const|alignment)\b'), "type info: fn param_types/param_attrs, pointer .attrs.@\"const\"/@\"align\""),
     (re.compile(r"\.linkage\s*=\s*\.(?:internal|link_once)\b"), "GlobalLinkage .internal and .link_once were removed"),
+    # @import("builtin") is generated, not in the std tree: its cpu/os/abi/object_format
+    # shortcuts are deprecated in 0.17.0 (removed in 0.18.0).
+    (re.compile(r"(?<!std\.)\bbuiltin\.(?:cpu|os|abi|object_format)\b"), "deprecated; use builtin.target.cpu / .os / .abi / .ofmt"),
     (re.compile(r"\bb\.(?:args|build_root)\b"), "b.args is gone (run.addPassthruArgs()); b.build_root is b.root"),
 ]
 
