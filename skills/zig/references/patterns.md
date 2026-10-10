@@ -1136,10 +1136,10 @@ pub const NodePool = struct {
     free_head: OptionalNode = .none,
 
     pub fn alloc(self: *NodePool, gpa: std.mem.Allocator) !Node {
-        if (self.free_head.unwrap()) |free| {
+        if (self.free_head.unwrap()) |slot| {
             // Reuse freed slot
-            self.free_head = self.nodes.items[@intFromEnum(free)].next_free;
-            return free;
+            self.free_head = self.nodes.items[@intFromEnum(slot)].next_free;
+            return slot;
         }
         // Allocate new slot
         const index: Node = @enumFromInt(self.nodes.items.len);
