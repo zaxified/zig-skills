@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Install the zig skill from an audited release into a skills directory.
+"""Install the zig-0.17 skill from an audited release into a skills directory.
 
 Run it from a checkout of a release tag:
 
   git clone --depth 1 --branch <tag> https://github.com/zaxified/zig-skills zig-skills
-  python3 zig-skills/scripts/install.py --dest ~/.claude/skills/zig          # this machine
-  python3 zig-skills/scripts/install.py --dest <repo>/.claude/skills/zig     # a project (also cloud sessions)
+  python3 zig-skills/scripts/install.py --dest ~/.claude/skills/zig-0.17     # this machine
+  python3 zig-skills/scripts/install.py --dest <repo>/.claude/skills/zig-0.17  # a project (also cloud sessions)
 
 Before copying anything it checks, in the checkout it runs from:
   1. HEAD is exactly a v* tag (not a branch tip);
@@ -192,7 +192,7 @@ def install(dest, allow_untagged):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     g = ap.add_mutually_exclusive_group(required=True)
-    g.add_argument("--dest", help="skills directory to install into, e.g. ~/.claude/skills/zig")
+    g.add_argument("--dest", help="skills directory to install into, e.g. ~/.claude/skills/zig-0.17")
     g.add_argument("--check", metavar="DIR", help="verify an installed copy against its manifest")
     ap.add_argument("--allow-untagged", action="store_true", help="development only: install a checkout that is not a release tag")
     a = ap.parse_args()

@@ -5,9 +5,12 @@ The published content is `skills/zig/` (Markdown only) plus `.claude-plugin/`, t
 
 ## Rules
 
-- The target is **Zig 0.16.0 as released**. Verify every API claim against the 0.16.0 std
-  source or by compiling it; never from memory or from another version's docs. Mark
-  anything newer as "0.17-dev only, not in 0.16.0".
+- The target is **Zig 0.17.0 as released** (branch `main`; 0.16.0 is maintained on
+  `release/0.16`, its skill is named `zig`, this one `zig-0.17`). Verify every API claim
+  against the 0.17.0 std source or by compiling it; never from memory, from another
+  version's docs or from a `-dev` build. Code that was right in 0.16 and is wrong in 0.17
+  is shown as `// WRONG (0.17)` next to the replacement.
+- Correct code uses no name the 0.17.0 std marks deprecated (`scripts/check-deprecated.py`).
 - Examples of removed or wrong code carry a `// WRONG` (or `0.15`, `removed`, `Before`)
   comment so `scripts/check-std-paths.py` skips them; correct code carries none.
 - Never make a check pass by weakening it. A legitimate hit of `scripts/audit.py` gets an
@@ -27,8 +30,9 @@ The published content is `skills/zig/` (Markdown only) plus `.claude-plugin/`, t
 python3 scripts/check-workflows.py
 python3 -m unittest discover -s tests
 python3 scripts/audit.py
-python3 scripts/check-std-paths.py      # needs zig 0.16.0 on PATH
+python3 scripts/check-std-paths.py      # needs zig 0.17.0 on PATH
 python3 scripts/check-examples.py       # compiles standalone examples; same
+python3 scripts/check-deprecated.py     # no deprecated/removed std name or syntax; same
 ```
 
 ## Releases

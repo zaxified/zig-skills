@@ -36,7 +36,7 @@ BAD_MARK = re.compile(
 # "// Before:"). Anywhere in the comment, a word like "before" in ordinary
 # prose silently switched off checking for the rest of the block.
 WRONG_LINE = re.compile(r"^\s*//+\s*(?:[-*(\[]\s*)?(WRONG|BAD\b|❌|OLD\b|Old\b|Before\b|0\.1[45]\b|Removed\b|removed\b|Deprecated\b)")
-RIGHT_LINE = re.compile(r"^\s*//+\s*(?:[-*(\[]\s*)?(CORRECT|GOOD\b|✅|0\.16\b|New\b|After\b|Now\b)")
+RIGHT_LINE = re.compile(r"^\s*//+\s*(?:[-*(\[]\s*)?(CORRECT|GOOD\b|✅|0\.1[67]\b|New\b|After\b|Now\b)")
 # Paths that only exist on another OS, target or behind a build option.
 IGNORE = re.compile(r"^(os\.windows|os\.wasi|os\.uefi|os\.plan9|Target\.\w+\.cpu)")
 

@@ -41,6 +41,8 @@ import unicodedata
 # What is published and therefore audited. Scripts, tests and CI are code and
 # are reviewed as code; they never reach a consumer's agent.
 PAYLOAD_DIR = "skills/zig"
+# The published skill name; 0.16.0 is maintained as "zig" on release/0.16.
+SKILL_NAME = "zig-0.17"
 AUDITED_EXTRA = ["README.md", "CLAUDE.md", "LICENSE", ".claude-plugin"]
 # Files our own reviewers and maintainers read. They describe attacks and quote
 # suspicious text on purpose, so wording rules do not apply; hidden text,
@@ -308,8 +310,8 @@ class Audit:
             if k not in SKILL_KEYS:
                 self.hit(r, 1, "manifest", f"frontmatter key '{k}' not allowed (only {sorted(SKILL_KEYS)})")
         top = re.search(r"^name:\s*(\S+)", m.group(1), re.M)
-        if not top or top.group(1) != "zig":
-            self.hit(r, 1, "manifest", "frontmatter name must be 'zig'")
+        if not top or top.group(1) != SKILL_NAME:
+            self.hit(r, 1, "manifest", f"frontmatter name must be '{SKILL_NAME}'")
 
     def check_json(self, r, text):
         try:

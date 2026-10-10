@@ -1,9 +1,9 @@
 {
   "name": "zig-skills",
-  "description": "Audited Zig 0.16.0 skill: current std and build-system APIs, migration notes, and gotchas found in production code. Every release passes a safety gate and a recorded audit.",
+  "description": "Audited Zig 0.17.0 skill: current std and build-system APIs, migration notes, and gotchas found in production code. Every release passes a safety gate and a recorded audit.",
   "author": { "name": "zaxified" },
   "homepage": "https://github.com/zaxified/zig-skills",
   "repository": "https://github.com/zaxified/zig-skills",
   "license": "MIT",
-  "keywords": ["zig", "zig-0.16", "build-system", "comptime", "std-library"]
+  "keywords": ["zig", "zig-0.17", "build-system", "comptime", "std-library"]
 }

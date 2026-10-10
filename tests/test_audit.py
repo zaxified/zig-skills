@@ -17,7 +17,7 @@ spec = importlib.util.spec_from_file_location("audit", os.path.join(HERE, "..", 
 audit = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(audit)
 
-FRONTMATTER = "---\nname: zig\ndescription: Zig patterns.\nlicense: MIT\n---\n\n"
+FRONTMATTER = "---\nname: zig-0.17\ndescription: Zig patterns.\nlicense: MIT\n---\n\n"
 
 CLEAN = FRONTMATTER + """# Zig
 
@@ -267,9 +267,23 @@ class MetaFiles(unittest.TestCase):
 
 
 class Manifest(unittest.TestCase):
+    def test_frontmatter_name_must_match(self):
+        # A renamed skill would shadow or be shadowed by another installed skill.
+        for name in ("zig", "zig-0.16", "other"):
+            root = Root(skill="---\nname: " + name + "\ndescription: d\n---\n")
+            try:
+                self.assertIn("manifest", root.rules(), name)
+            finally:
+                root.close()
+        root = Root(skill="---\nname: zig-0.17\ndescription: d\n---\n")
+        try:
+            self.assertNotIn("manifest", root.rules())
+        finally:
+            root.close()
+
     def test_frontmatter_granting_tools_rejected(self):
         for key in ("allowed-tools: Bash", "hooks:\n  PreToolUse: []", "model: opus"):
-            root = Root(skill="---\nname: zig\ndescription: d\n" + key + "\n---\n")
+            root = Root(skill="---\nname: zig-0.17\ndescription: d\n" + key + "\n---\n")
             try:
                 self.assertIn("manifest", root.rules(), key)
             finally:

@@ -1,5 +1,5 @@
 ---
-name: zig
+name: zig-0.17
 description: "Up-to-date Zig 0.16.0 patterns, checked against the released standard library. Use when writing, reviewing, or debugging Zig code, build.zig and build.zig.zon files, or comptime metaprogramming. Prevents outdated patterns from training data: the std.Io instance threaded through files, sockets, clocks and locks (std.fs to std.Io.Dir/File, std.net to std.Io.net, std.time timestamps and Timer to std.Io.Clock, std.Thread.Mutex/Condition/Pool to std.Io.Mutex/Condition/Group, std.crypto.random to io.randomSecure), main(init: std.process.Init), build system APIs (root_module, Compile methods to Module methods), buffered Reader/Writer with flush, container initialization (.empty/.init), unmanaged ArrayList and HashMap, DebugAllocator, lowercase @typeInfo fields, removed async/await and usingnamespace; plus gotchas found in production code."
 license: MIT
 compatibility:
@@ -7,7 +7,7 @@ compatibility:
   - opencode
   - codex
 metadata:
-  version: "0.16.0"
+  version: "0.17.0"
   language: "zig"
   category: "programming-language"
 ---

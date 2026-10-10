@@ -45,5 +45,77 @@ class Markers(unittest.TestCase):
         self.assertFalse(paths.FILE_GONE.search("try writer.writeAll(x);"))
 
 
+dspec = importlib.util.spec_from_file_location("deprecated", os.path.join(HERE, "..", "scripts", "check-deprecated.py"))
+deprecated = importlib.util.module_from_spec(dspec)
+dspec.loader.exec_module(deprecated)
+
+FAKE_STD = {
+    "std.zig": '/// Deprecated; use `lang`.\npub const builtin = lang;\npub const lang = @import("lang.zig");\n',
+    "fmt.zig": ('/// Deprecated in favor of `Allocator.print`.\npub fn allocPrint() void {}\n'
+                'pub fn bufPrint() void {}\n'),
+    "heap.zig": ('/// The minimum page size.\npub const page_size_min: usize = x orelse @compileError("no");\n'
+                 '/// Default initialization of this struct is deprecated; use `.empty` instead.\npub const Arena = struct {};\n'),
+    "testing.zig": 'pub const allocator = if (is_test) a else @compileError("not testing");\n',
+    "Uri.zig": 'pub const getHost = @compileError("moved to HostName.fromUri");\n',
+    "array_list.zig": ('pub fn Aligned() type { return struct {\n'
+                       '    /// Deprecated in favor of `last`\n    pub const getLastOrNull = last;\n'
+                       '    /// Deprecated in favor of `popLast`\n    pub fn pop() void {}\n'
+                       '    pub fn last() void {}\n}; }\n'),
+    "deque.zig": 'pub fn D() type { return struct {\n    pub fn pop() void {}\n}; }\n',
+    "fs/path.zig": '/// Deprecated in favor of `relativeAlloc`.\npub fn relative() void {}\n',
+}
+
+
+class Deprecated(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+        cls.tmp = tempfile.TemporaryDirectory()
+        for rel, body in FAKE_STD.items():
+            path = os.path.join(cls.tmp.name, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(body)
+        cls.q, cls.m = deprecated.scan_std(cls.tmp.name)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def hit(self, code):
+        return deprecated.line_hit(code, self.q, self.m)
+
+    def test_qualified_deprecated_and_removed(self):
+        self.assertEqual(self.hit("const s = try std.fmt.allocPrint(a, x, .{});")[0], "std.fmt.allocPrint")
+        self.assertEqual(self.hit("const B = std.builtin.Type;")[0], "std.builtin")
+        self.assertEqual(self.hit("_ = std.Uri.getHost;")[0], "std.Uri.getHost")
+        self.assertEqual(self.hit("std.fs.path.relative(a, b)")[0], "std.fs.path.relative")
+
+    def test_alive_and_lookalikes_pass(self):
+        for code in ("_ = try std.fmt.bufPrint(&b, x, .{});",
+                     "const p = std.heap.page_size_min;",           # @compileError inside an expression
+                     "var a: std.heap.Arena = .{};",                 # field-default deprecation, not the decl
+                     "const gpa = std.testing.allocator;",           # "not testing" guard
+                     "@memcpy(buf[0..relative.len], relative);",     # range end, namespace-only name
+                     "const x = q.pop();"):                          # pop is alive elsewhere
+            self.assertIsNone(self.hit(code), code)
+
+    def test_member_only_when_unique(self):
+        self.assertEqual(self.hit("if (list.getLastOrNull()) |x| {}")[0], ".getLastOrNull")
+
+    def test_language_rules(self):
+        bad = ["const z = [_]u8{0} ** 16;", 'const s = "ab" ** 3;', "errdefer |err| log(err);",
+               "const v = void{};", "const x: i0 = 0;", "const c = @cImport(@cInclude(\"a.h\"));",
+               "const n = @intFromEnum(e);", 'inline for (@typeInfo(T).@"struct".fields) |f| {}',
+               ".linkage = .internal,", "if (b.args) |args| run.addArgs(args);"]
+        for code in bad:
+            self.assertIsNotNone(self.hit(code), code)
+        good = ["const z: [16]u8 = @splat(0);", "const p = a ** b;", "errdefer gpa.free(x);",
+                "const n = @backingInt(e);", 'inline for (info.field_names) |n| {}', "const u: u0 = 0;",
+                "run.addPassthruArgs();", ".linkage = .strong,"]
+        for code in good:
+            self.assertIsNone(self.hit(code), code)
+
+
 if __name__ == "__main__":
     unittest.main()

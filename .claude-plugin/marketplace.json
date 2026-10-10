@@ -6,7 +6,7 @@
     {
       "name": "zig-skills",
       "source": "./",
-      "description": "Audited Zig 0.16.0 skill: current std and build-system APIs, migration notes, and production gotchas."
+      "description": "Audited Zig 0.17.0 skill: current std and build-system APIs, migration notes, and production gotchas."
     }
   ]
 }

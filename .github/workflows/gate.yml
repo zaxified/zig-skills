@@ -93,12 +93,12 @@ jobs:
           "$RUNNER_TEMP/actionlint" -shellcheck= -pyflakes=
 
   std-paths:
-    name: Zig 0.16.0 correctness
+    name: Zig 0.17.0 correctness
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
-      ZIG_VERSION: 0.16.0
-      ZIG_SHA256: 70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
+      ZIG_VERSION: 0.17.0
+      ZIG_SHA256: 1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -109,10 +109,12 @@ jobs:
           echo "${ZIG_SHA256}  zig.tar.xz" | sha256sum -c -
           tar -xJf zig.tar.xz
           echo "$PWD/zig-x86_64-linux-${ZIG_VERSION}" >> "$GITHUB_PATH"
-      - name: Every std path in the examples exists in Zig 0.16.0
+      - name: Every std path in the examples exists in Zig 0.17.0
         run: python3 scripts/check-std-paths.py
-      - name: Every standalone example compiles on Zig 0.16.0
+      - name: Every standalone example compiles on Zig 0.17.0
         run: python3 scripts/check-examples.py
+      - name: No correct example uses a name Zig 0.17.0 deprecates or removed
+        run: python3 scripts/check-deprecated.py
 
   release:
     name: Release record
