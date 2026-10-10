@@ -153,7 +153,7 @@ state: switch (initial_state) {
         if (done) break :state result;  // exit with value
         continue :state .running;       // loop
     },
-    .error => return error.Failed,
+    .failed => return error.Failed,  // (`error` is a keyword: not usable as an enum tag name unquoted)
 }
 ```
 
@@ -638,15 +638,12 @@ fn isInteger(comptime T: type) bool {
     return @typeInfo(T) == .int;
 }
 
-fn fieldNames(comptime T: type) []const []const u8 {
+fn fieldNames(comptime T: type) []const [:0]const u8 {
     const info = @typeInfo(T);
     if (info != .@"struct") @compileError("expected struct");
-
-    var names: [info.@"struct".field_names.len][]const u8 = undefined;
-    for (info.@"struct".field_names, 0..) |name, i| {
-        names[i] = name;
-    }
-    return &names;
+    // field_names is already a comptime-known slice; do NOT build a local array and
+    // return &array at runtime (that would dangle).
+    return info.@"struct".field_names;
 }
 ```
 

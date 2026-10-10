@@ -21,7 +21,7 @@ const std = @import("std");
 
 pub fn analyzeSource(allocator: std.mem.Allocator, source: [:0]const u8) !void {
     // Parse source into AST
-    var tree = try std.zig.Ast.parse(allocator, source, .zig);
+    var tree = try std.zig.Ast.parse(allocator, source, .{});
     defer tree.deinit(allocator);
 
     // Check for parse errors
@@ -45,7 +45,7 @@ pub fn analyzeSource(allocator: std.mem.Allocator, source: [:0]const u8) !void {
 
 ### Parse ZON Data
 ```zig
-var tree = try std.zig.Ast.parse(allocator, zon_source, .zon);
+var tree = try std.zig.Ast.parse(allocator, zon_source, .{ .mode = .zon });
 defer tree.deinit(allocator);
 // Root node contains the ZON expression
 ```
@@ -144,11 +144,11 @@ const Ast = struct {
 ### Parsing
 ```zig
 // Parse Zig source
-var tree = try std.zig.Ast.parse(allocator, source, .zig);
+var tree = try std.zig.Ast.parse(allocator, source, .{});
 defer tree.deinit(allocator);
 
 // Parse ZON
-var zon_tree = try std.zig.Ast.parse(allocator, zon_source, .zon);
+var zon_tree = try std.zig.Ast.parse(allocator, zon_source, .{ .mode = .zon });
 defer zon_tree.deinit(allocator);
 ```
 
@@ -484,7 +484,7 @@ if (tree.fullPtrType(node)) |ptr| {
 
 ### Check for Parse Errors
 ```zig
-var tree = try std.zig.Ast.parse(allocator, source, .zig);
+var tree = try std.zig.Ast.parse(allocator, source, .{});
 defer tree.deinit(allocator);
 
 if (tree.errors.len > 0) {
@@ -516,8 +516,7 @@ Structured error collection for compiler diagnostics.
 const ErrorBundle = std.zig.ErrorBundle;
 
 // Create error bundle from AST errors
-var wip_errors: ErrorBundle.Wip = undefined;
-try wip_errors.init(allocator);
+var wip_errors: ErrorBundle.Wip = try .init(allocator);
 defer wip_errors.deinit();
 
 try std.zig.putAstErrorsIntoBundle(allocator, tree, "file.zig", &wip_errors);
@@ -525,8 +524,9 @@ try std.zig.putAstErrorsIntoBundle(allocator, tree, "file.zig", &wip_errors);
 var bundle = try wip_errors.toOwnedBundle("");
 defer bundle.deinit(allocator);
 
-// Render to stderr
-bundle.renderToStdErr(.{ .ttyconf = .no_color });
+// Render to stderr (needs the Io; `color` is std.zig.Color: .auto/.on/.off)
+try bundle.renderToStderr(io, .{}, .auto);
+// ... or into any *std.Io.Writer: try bundle.renderToWriter(.{}, w);
 
 // Or iterate errors
 for (bundle.getMessages()) |msg_idx| {

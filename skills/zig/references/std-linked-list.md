@@ -36,7 +36,7 @@ list.insertBefore(&a.node, &c.node);  // insert c before a
 
 // Remove
 list.remove(&a.node);         // O(1) remove specific node
-const last = list.pop();      // remove and return last
+const last = list.popLast();  // remove and return last (pop() is deprecated)
 const first = list.popFirst(); // remove and return first
 
 // Get data from node
@@ -146,7 +146,7 @@ fn access(key: []const u8) ?*Entry {
 }
 
 fn evictOldest() void {
-    if (lru_list.pop()) |node| {
+    if (lru_list.popLast()) |node| {
         const entry: *Entry = @fieldParentPtr("node", node);
         _ = entries.remove(entry.key);
         // free entry

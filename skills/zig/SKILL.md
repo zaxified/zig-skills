@@ -349,7 +349,7 @@ const ms = std.time.milliTimestamp();
 const secs = std.Io.Clock.real.now(io).toSeconds();       // wall clock
 const ms = std.Io.Clock.real.now(io).toMilliseconds();
 const t0 = std.Io.Clock.awake.now(io);                     // monotonic, for timing
-const elapsed = t0.durationTo(std.Io.Clock.awake.now(io)); // Io.Clock.Duration
+const elapsed = t0.durationTo(std.Io.Clock.awake.now(io)); // Io.Duration
 ```
 
 `std.time.ns_per_s` and the other unit constants are **still present**. Without an `Io` and
@@ -865,7 +865,7 @@ var server = std.http.Server.init(
 | `'lockStderrWriter' not found` | Renamed: use `std.debug.lockStderr(&buf)` (0.16) |
 | `local constant shadows declaration` | 0.16 forbids local names matching module-level `extern fn` — rename local |
 | `signed integer division` | Use `@divTrunc(a, b)` (or `@divFloor`) not `a / b` for signed integers |
-| `no field 'close' in 'posix'` | `std.posix.close` removed: use `_ = std.c.close(fd)` (0.16) |
+| `no field 'close' in 'posix'` | `std.posix.close` removed (0.16): close through the owning `Io` type (`file.close(io)`, `stream.close(io)`); a raw fd with libc linked: `_ = std.c.close(fd)` |
 | `use of undefined value` | Arithmetic on `undefined` is now illegal — initialize explicitly |
 | `type 'f32' cannot represent integer` | Use float literal: `123_456_789.0` not `123_456_789` |
 | `ambiguous format string` | Use `{f}` for format methods |
@@ -985,7 +985,7 @@ Load these references when working with specific modules:
 - **[std.enums](references/std-enums.md)** - EnumSet, EnumMap, EnumArray: bit-backed enum collections
 
 ### Allocators
-- **[std.heap](references/std-allocators.md)** - Allocator selection guide, ArenaAllocator, SafeAllocator, FixedBufferAllocator, MemoryPool, SmpAllocator, ThreadSafeAllocator, BufferFirstAllocator, custom allocator implementation
+- **[std.heap](references/std-allocators.md)** - Allocator selection guide, ArenaAllocator, SafeAllocator, FixedBufferAllocator, MemoryPool, SmpAllocator, BufferFirstAllocator, custom allocator implementation
 
 ### I/O & Files
 - **[std.io](references/std-io.md)** - Reader/Writer API (0.15.x): buffered I/O, streaming, binary data, format strings

@@ -4,7 +4,7 @@ Thread spawning and synchronization in Zig 0.16.
 
 ## Critical: Sync Primitives Removed From std.Thread (0.16)
 
-`std.Thread.Mutex`, `std.Thread.Mutex.Recursive`, `std.Thread.Condition`, `std.Thread.RwLock`, `std.Thread.Semaphore`, `std.Thread.Futex`, `std.Thread.Pool`, `std.Thread.WaitGroup`, `std.Thread.ResetEvent`, and `std.Thread.sleep` are **all removed** from `std.Thread`. Only `std.Thread.spawn` and the thread-identity/utility functions (`getCurrentId`, `getCpuCount`, `yield`, `setName`/`getName`) remain there, unchanged.
+`std.Thread.Mutex`, `std.Thread.Mutex.Recursive`, `std.Thread.Condition`, `std.Thread.RwLock`, `std.Thread.Semaphore`, `std.Thread.Futex`, `std.Thread.Pool`, `std.Thread.WaitGroup`, `std.Thread.ResetEvent`, and `std.Thread.sleep` are **all removed** from `std.Thread`. Only `std.Thread.spawn` and the thread-identity/utility functions (`getCurrentId`, `getCpuCount`, `yield`, `setName`/`getName`) remain there; `setName` now takes an `io: Io` (`getName` does not).
 
 Where things moved:
 
@@ -173,7 +173,7 @@ std.Thread.yield() catch {};  // hint to scheduler
 ### Thread Names (Platform-dependent)
 
 ```zig
-var thread = try std.Thread.spawn(.{}, worker, .{});
+const thread = try std.Thread.spawn(.{}, worker, .{});
 
 // Set thread name (max length varies by OS) — needs an `io: Io` in 0.16
 try thread.setName(io, "worker-1");
@@ -214,7 +214,7 @@ if (mutex.tryLock()) {
 
 ### RwLock
 
-Reader-writer lock: multiple readers OR one writer. Moved to `std.Io.RwLock` — same shape, every method now takes `io: Io` (except the non-blocking `tryLock*` variants).
+Reader-writer lock: multiple readers OR one writer. Moved to `std.Io.RwLock` — same shape, every method, including the non-blocking `tryLock`/`tryLockShared`, now takes `io: Io`.
 
 ```zig
 var rwlock: std.Io.RwLock = .init;
@@ -234,13 +234,13 @@ fn writer(io: std.Io, new_data: []const u8) !void {
     data = new_data;
 }
 
-// Non-blocking variants (no `io` needed)
-if (rwlock.tryLockShared()) {
+// Non-blocking variants (also take `io`)
+if (rwlock.tryLockShared(io)) {
     defer rwlock.unlockShared(io);
     // read
 }
 
-if (rwlock.tryLock()) {
+if (rwlock.tryLock(io)) {
     defer rwlock.unlock(io);
     // write
 }
@@ -248,7 +248,7 @@ if (rwlock.tryLock()) {
 
 ### Condition
 
-**Note (0.16):** `std.Thread.Condition` is removed. Use `std.Io.Condition`, which needs `io: Io`. There is no built-in `timedWait` — a bounded wait needs a separate timeout mechanism layered on top of `wait` (e.g. racing against `io.sleep` via `Io.Group`), not shown here.
+**Note (0.16):** `std.Thread.Condition` is removed. Use `std.Io.Condition`, which needs `io: Io`. A bounded wait is `cond.waitTimeout(io, &mutex, timeout)` (see below).
 
 Wait for a condition to become true. Always use with a Mutex.
 
@@ -277,11 +277,20 @@ fn producer(io: std.Io) !void {
     cond.signal(io);     // wake one waiter
     // cond.broadcast(io); // wake all waiters
 }
+
+// Bounded wait: returns error.Timeout when the duration elapses
+fn consumerTimed(io: std.Io) !void {
+    try mutex.lock(io);
+    defer mutex.unlock(io);
+    while (!ready) {
+        try cond.waitTimeout(io, &mutex, .{ .duration = .{ .raw = .fromMilliseconds(50), .clock = .awake } });
+    }
+}
 ```
 
 ### Semaphore
 
-Counting semaphore for resource limiting. Moved to `std.Io.Semaphore`; `wait`/`post` take `io: Io`. There is no built-in `timedWait`.
+Counting semaphore for resource limiting. Moved to `std.Io.Semaphore`; `wait`/`post` take `io: Io`. A bounded wait is `sem.waitTimeout(io, timeout)` (`error.Timeout` on expiry).
 
 ```zig
 var sem: std.Io.Semaphore = .{ .permits = 3 };  // 3 permits available

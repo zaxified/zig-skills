@@ -115,7 +115,7 @@ const TagEnum = std.meta.Tag(Tagged);  // enum { a, b }
 ```zig
 const Value = union(enum) { int: i32, float: f32 };
 
-var v = Value{ .int = 42 };
+const v = Value{ .int = 42 };
 const tag = std.meta.activeTag(v);  // Value.int
 
 switch (tag) {
@@ -362,7 +362,7 @@ var flags = Flags.init(.{
 
 // Allocate only needed space
 const size = flags.sizeInBytes();
-const data = try allocator.alignedAlloc(u8, @alignOf(@TypeOf(flags).Fields), size);
+const data = try allocator.alignedAlloc(u8, std.mem.Alignment.of(@TypeOf(flags).Fields), size);
 defer allocator.free(data);
 
 // Set values

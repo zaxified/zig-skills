@@ -196,7 +196,7 @@ var c1 = try std.process.spawn(io, .{
 _ = try c1.wait(io);
 
 // Option 2: directory handle
-var dir = try std.Io.Dir.cwd().openDir(io, "project", .{});
+const dir = try std.Io.Dir.cwd().openDir(io, "project", .{});
 defer dir.close(io);
 var c2 = try std.process.spawn(io, .{
     .argv = &.{"make"},
@@ -252,16 +252,6 @@ var child = try std.process.spawn(io, .{
     .argv = &.{"app.exe"},
     .create_no_window = true,  // hide console window
     .start_suspended = true,   // start paused
-});
-_ = try child.wait(io);
-```
-
-### Darwin-only: Disable ASLR
-
-```zig
-var child = try std.process.spawn(io, .{
-    .argv = &.{"debugee"},
-    .disable_aslr = true,
 });
 _ = try child.wait(io);
 ```
@@ -459,7 +449,7 @@ Change the working directory with `setCurrentPath` (by path) or `setCurrentDir`
 ```zig
 try std.process.setCurrentPath(io, "/tmp");
 
-var dir = try std.Io.Dir.cwd().openDir(io, ".", .{});
+const dir = try std.Io.Dir.cwd().openDir(io, ".", .{});
 defer dir.close(io);
 try std.process.setCurrentDir(io, dir);
 ```
@@ -503,7 +493,7 @@ var env = std.process.Environ.Map.init(gpa);
 defer env.deinit();
 try env.put("PATH", "/bin");
 
-var dir = try std.Io.Dir.cwd().openDir(io, "/bin", .{});
+const dir = try std.Io.Dir.cwd().openDir(io, "/bin", .{});
 defer dir.close(io);
 return std.process.replace(io, .{
     .exe = .{ .path = dir },

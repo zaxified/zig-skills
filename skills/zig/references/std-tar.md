@@ -1,6 +1,6 @@
 # std.tar - Tar Archive API Reference
 
-Tar archive reading and writing in Zig 0.15.x. Supports POSIX ustar, GNU extensions for long names, and pax extended headers.
+Tar archive reading and writing in Zig 0.17.0. Supports POSIX ustar, GNU extensions for long names, and pax extended headers.
 
 ## Table of Contents
 - [Module Structure](#module-structure)
@@ -68,12 +68,14 @@ pub const File = struct {
 
 File content must be read before calling `next()` again:
 
+**Untrusted archive:** `file.name` comes from the archive and may contain `..` or be absolute (zip-slip). Validate it (no `..` component, not absolute) before using it as a path, or extract with `std.tar.extract` (see "Extracting to Filesystem"), which does the checks.
+
 ```zig
 while (try it.next()) |file| {
     if (file.kind == .file) {
-        // Option 1: Stream to writer
+        // Option 1: Stream to writer (file.name must be validated first, see above)
         var buf: [1024]u8 = undefined;
-        var output_file = try dir.createFile(io, file.name, .{});
+        const output_file = try dir.createFile(io, file.name, .{});
         defer output_file.close(io);
         var file_writer = output_file.writer(io, &buf);
         try it.streamRemaining(file, &file_writer.interface);
@@ -179,7 +181,7 @@ const tar_bytes = output.written();
 ### Writing from File
 
 ```zig
-var output_file = try std.Io.Dir.cwd().createFile(io, "archive.tar", .{});
+const output_file = try std.Io.Dir.cwd().createFile(io, "archive.tar", .{});
 defer output_file.close(io);
 var buf: [4096]u8 = undefined;
 var file_writer = output_file.writer(io, &buf);
@@ -187,7 +189,7 @@ var file_writer = output_file.writer(io, &buf);
 var w: std.tar.Writer = .{ .underlying_writer = &file_writer.interface };
 
 // Write file from disk
-var src_file = try std.Io.Dir.cwd().openFile(io, "data.txt", .{});
+const src_file = try std.Io.Dir.cwd().openFile(io, "data.txt", .{});
 defer src_file.close(io);
 var src_buf: [4096]u8 = undefined;
 var src_reader = src_file.reader(io, &src_buf);
@@ -224,7 +226,10 @@ pub fn writeFileBytes(w: *Writer, sub_path: []const u8, content: []const u8, opt
 pub fn writeFileStream(w: *Writer, sub_path: []const u8, size: u64, reader: *std.Io.Reader, options: Options) WriteFileStreamError!void
 
 // Write file from file reader
-pub fn writeFile(w: *Writer, sub_path: []const u8, file_reader: *std.Io.File.Reader, stat_mtime: i128) WriteFileError!void
+pub fn writeFile(w: *Writer, sub_path: []const u8, file_reader: *std.Io.File.Reader, mtime: u64) WriteFileError!void
+
+// Same, taking the file's Io.Timestamp (converted to POSIX seconds)
+pub fn writeFileTimestamp(w: *Writer, sub_path: []const u8, file_reader: *std.Io.File.Reader, mtime: std.Io.Timestamp) WriteFileError!void
 
 // Write symbolic link
 pub fn writeLink(w: *Writer, sub_path: []const u8, link_name: []const u8, options: Options) Error!void
@@ -373,11 +378,11 @@ fn createTarFromDir(io: std.Io, allocator: Allocator, source_dir: std.Io.Dir, ro
     var walker = try source_dir.walk(allocator);
     defer walker.deinit();
 
-    while (try walker.next()) |entry| {
+    while (try walker.next(io)) |entry| {
         switch (entry.kind) {
             .directory => try w.writeDir(entry.path, .{}),
             .file => {
-                var file = try entry.dir.openFile(io, entry.basename, .{});
+                const file = try entry.dir.openFile(io, entry.basename, .{});
                 defer file.close(io);
                 var buf: [4096]u8 = undefined;
                 var file_reader = file.reader(io, &buf);

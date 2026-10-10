@@ -119,17 +119,19 @@ while (i > 0) {
 
 ## Reserve-First Pattern (Exception Safety)
 
+Note: the map is the *unmanaged* variant, whose methods take the allocator (the managed `AutoHashMap` methods take none).
+
 When inserting into multiple containers or when partial mutation would corrupt state, use **reserve-first**: separate fallible reservation from infallible mutation.
 
 ```zig
 // BAD - partial failure leaves invalid state
-fn addItem(list: *std.ArrayList(u32), map: *std.AutoHashMap(u32, usize), gpa: Allocator, value: u32) !void {
+fn addItem(list: *std.ArrayList(u32), map: *std.AutoHashMapUnmanaged(u32, usize), gpa: Allocator, value: u32) !void {
     try list.append(gpa, value);              // Can fail
     try map.put(gpa, value, list.items.len);  // If this fails, list has orphan entry!
 }
 
 // GOOD - reserve first, then mutate
-fn addItem(list: *std.ArrayList(u32), map: *std.AutoHashMap(u32, usize), gpa: Allocator, value: u32) !void {
+fn addItem(list: *std.ArrayList(u32), map: *std.AutoHashMapUnmanaged(u32, usize), gpa: Allocator, value: u32) !void {
     // Phase 1: Reserve (fallible, but no mutation)
     try list.ensureUnusedCapacity(gpa, 1);
     try map.ensureUnusedCapacity(gpa, 1);

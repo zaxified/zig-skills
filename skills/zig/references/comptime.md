@@ -241,7 +241,7 @@ else
 // array plus a byte swap on little-endian hosts is wrong on big-endian targets in 0.17,
 // where an array `@bitCast` is defined as little-endian on every target.
 pub fn readIntBig(comptime T: type, bytes: []const u8) T {
-    return std.mem.readInt(T, bytes[0..@sizeOf(T)], .big);
+    return std.mem.readInt(T, bytes[0..@divExact(@bitSizeOf(T), 8)], .big); // u24 reads 3 bytes, not @sizeOf = 4
 }
 ```
 
