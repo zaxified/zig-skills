@@ -1,4 +1,4 @@
-# std.http Reference (0.16.0)
+# std.http Reference (0.17.0)
 
 HTTP client and server implementation with TLS, connection pooling, compression, and WebSocket support.
 

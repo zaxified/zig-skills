@@ -1,27 +1,37 @@
 # zig-skills
 
-[![gate](https://github.com/zaxified/zig-skills/actions/workflows/gate.yml/badge.svg)](https://github.com/zaxified/zig-skills/actions/workflows/gate.yml) [![Zig 0.16.0](https://img.shields.io/badge/Zig-0.16.0-f7a41d)](https://ziglang.org/download/) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![gate](https://github.com/zaxified/zig-skills/actions/workflows/gate.yml/badge.svg)](https://github.com/zaxified/zig-skills/actions/workflows/gate.yml) [![Zig 0.17.0](https://img.shields.io/badge/Zig-0.17.0-f7a41d)](https://ziglang.org/download/) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Scanned by NVIDIA SkillSpector](https://img.shields.io/badge/scanned_by-NVIDIA_SkillSpector-76b900)](https://github.com/NVIDIA/SkillSpector) [![Audited releases](https://img.shields.io/badge/releases-audited-2ea44f)](audits/) [![Latest release](https://img.shields.io/github/v/tag/zaxified/zig-skills)](https://github.com/zaxified/zig-skills/tags)
 
-An agent skill for **Zig 0.16.0**: the current std and build-system APIs, migration notes
-from 0.14/0.15, and gotchas found in production code. Every release is audited so that
+An agent skill for **Zig 0.17.0**: the current std and build-system APIs, migration notes
+from 0.14 to 0.16, and gotchas found in production code. Every release is audited so that
 nothing in it can turn against the agent, or the person, using it.
 
-Most model training data predates the 0.15 I/O rewrite and the 0.16 `std.Io` redesign, so
-models confidently write `std.io.getStdOut()`, `std.time.timestamp()`, `std.Thread.Mutex`
-or managed `ArrayList` calls that no longer compile. The skill tells the agent what changed
-and what the 0.16 code looks like, and every `std.*` path used in its correct examples is
-checked against the released 0.16.0 standard library in CI.
+Most model training data predates the 0.15 I/O rewrite, the 0.16 `std.Io` redesign and the
+0.17 language changes, so models confidently write `std.io.getStdOut()`,
+`std.time.timestamp()`, `[_]u8{0} ** n`, `@typeInfo(T).@"struct".fields` or
+`std.heap.DebugAllocator` that no longer compile or are on their way out. The skill tells the
+agent what changed and what the 0.17 code looks like. In CI, every `std.*` path in its
+correct examples must exist in the released 0.17.0 standard library, every standalone
+example must compile, and no correct example may use a name the 0.17.0 std marks deprecated.
+
+| Zig | Skill name | Branch | Tags |
+|---|---|---|---|
+| 0.17.x | `zig-0.17` | `main` | `v0.17.0-rN` |
+| 0.16.x | `zig` | `release/0.16` | `v0.16.0-rN` |
+
+The names differ so both can be installed side by side; install the one matching the
+project's `zig version`.
 
 ## What is in it
 
-- `skills/zig/SKILL.md`: breaking changes with WRONG/CORRECT examples, the 0.16 `std.Io`
-  model, build system migration, container initialization, a quick-fix table for common
+- `skills/zig/SKILL.md`: breaking changes with WRONG/CORRECT examples (0.17 first), the
+  `std.Io` model, build system migration, container initialization, a quick-fix table for common
   compile errors, and an index of the references.
 - `skills/zig/references/`: one file per std module or topic (ArrayList, HashMap, Io, net,
   http, json, crypto, process, build, testing and fuzzing, comptime, C interop, SIMD,
   data-oriented design, quality tooling), a code-review checklist, and
-  `zig-016-gotchas.md`: traps that compile cleanly and are wrong, each confirmed on 0.16.0.
+  `zig-gotchas.md`: traps that compile cleanly and are wrong, found on 0.16.0, each with its status on 0.17.0.
 
 ## Why you can trust a release
 
@@ -45,8 +55,10 @@ your permissions. So a release has to clear five independent checks:
    harmless; any other finding fails the build. Workflows are checked by
    [zizmor](https://github.com/zizmorcore/zizmor) and
    [actionlint](https://github.com/rhysd/actionlint), each pinned by digest or checksum.
-3. **Correctness check** (`scripts/check-std-paths.py`, CI). Every `std.a.b.c` path in the
-   correct examples must exist in the Zig 0.16.0 standard library.
+3. **Correctness check** (CI, on the released Zig 0.17.0). Every `std.a.b.c` path in the
+   correct examples must exist (`scripts/check-std-paths.py`), every standalone example must
+   compile (`scripts/check-examples.py`), and no correct example may use a deprecated or
+   removed name, read from the std itself (`scripts/check-deprecated.py`).
 4. **Review of the change.** A reviewer model with read-only tools goes through the diff
    since the last release against a fixed checklist (`audit/REVIEW.md`). Its report is
    advisory, because the content under review can try to influence it; the deterministic
@@ -63,7 +75,7 @@ Install from a release tag, never from `main`:
 
 ```bash
 git clone --depth 1 --branch <tag> https://github.com/zaxified/zig-skills zig-skills
-python3 zig-skills/scripts/install.py --dest <skills-dir>/zig
+python3 zig-skills/scripts/install.py --dest <skills-dir>/zig-0.17   # zig for a v0.16.0 tag
 ```
 
 `<skills-dir>` is your agent's skills directory: the user-level one for this machine, or
@@ -77,7 +89,7 @@ the files it lists. To check that an installed copy is untouched, for example in
 consumer's CI:
 
 ```bash
-python3 zig-skills/scripts/install.py --check <skills-dir>/zig
+python3 zig-skills/scripts/install.py --check <skills-dir>/zig-0.17
 ```
 
 As a Claude Code plugin, pinned to a release:
@@ -90,8 +102,8 @@ claude plugin install zig-skills@zig-skills
 ## Provenance and license
 
 Built on [nzrsky/zig-skills](https://github.com/nzrsky/zig-skills) (MIT), whose history this
-repository keeps. Since then: compile-verified 0.16.0 corrections, the gotchas reference,
-the safety gate and the release audit. The upstream `main` targets 0.17-dev; changes from
-it are taken selectively and verified against 0.16.0.
+repository keeps. Since then: compile-verified 0.16.0 and 0.17.0 corrections, the gotchas
+reference, the safety gate and the release audit. Upstream `main` targets an early 0.17-dev
+build; changes from it are taken selectively and verified against the released 0.17.0.
 
 MIT, see [LICENSE](LICENSE).

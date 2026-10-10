@@ -1,12 +1,42 @@
-# Zig 0.16.0 Gotchas (found in production code)
+# Zig Gotchas (found in production code, checked on 0.17.0)
 
-Traps that compile cleanly and look idiomatic, each found in real code on Zig 0.16.0 and
-confirmed against the std source or by measurement. Most produce no error at all: the
-program runs and is wrong, slow, or leaks.
+Traps that compile cleanly and look idiomatic, each found in real code and confirmed against
+the std source or by measurement. Most produce no error at all: the program runs and is
+wrong, slow, or leaks. They were found on 0.16.0; each entry says whether 0.17.0 still has it.
+
+## New in 0.17.0
+
+### Silent behaviour changes
+- **`@bitCast` of arrays and vectors** now reinterprets logical bits, element 0 first: on a
+  big-endian target an array-to-integer cast gives a different value than in 0.16. Little-endian
+  results are unchanged. (A cast of an `extern struct` stopped compiling, so it cannot go
+  silently wrong.)
+- **`@hasDecl` is `false` for a non-`pub` declaration**, also from inside the same file. A
+  `comptime` feature probe written as `@hasDecl(Self, "helper")` on a private helper flips to
+  `false` and silently takes the fallback path.
+- **`std.mem.containsAtLeastScalar(T, list, element, minimum)`** swapped its last two
+  parameters. With `u8`/`usize`-compatible integers an old call still compiles and answers a
+  different question.
+- **`std.testing.allocator` never reuses memory** (it is a `SafeAllocator`). Use-after-free
+  turns into a segfault or a panic much more often — good — but a test that allocates and frees
+  in a long loop grows its RSS with the total allocated, not the peak.
+
+### Tooling
+- **ZLS does not work with 0.17.0** (the build runner it hooked into is gone). Editor
+  diagnostics stay empty or stale; compile to see errors.
+- **The first `zig build` after installing 0.17 compiles the maker** (measured about two
+  minutes, once per toolchain and global cache). A fresh CI runner pays it on every job unless
+  the global cache (`~/.cache/zig`) is cached.
+- **`ArrayList` gained `pointer_stability`** (a `std.debug.SafetyLock`). A field-by-field
+  literal stops compiling; `.empty` and `initBuffer` are unaffected. `lockPointers()` /
+  `unlockPointers()` make any growth while a pointer into the list is held trip an assertion
+  in safe builds.
 
 ## Language
 
 ### `a, b = .{ b, a }` is not a swap
+
+Still true in 0.17.0.
 
 Result-location semantics build the tuple straight into the destinations: `a` is assigned
 `b` first, then `b` reads the already-overwritten `a`. Both end up equal.
@@ -26,6 +56,8 @@ measured case reassembled two `u32` locals byte by byte (+16 % instructions in a
 compressor inner loop). Only a byte-exact golden test told the "speedup" apart from the bug.
 
 ### A generic struct that never names its parameter is one type
+
+Still true in 0.17.0.
 
 A type's identity is its declaration site plus the comptime values it captures. If the
 returned struct never references the parameter, every instantiation is the same type and
@@ -54,6 +86,8 @@ test "one type per config" {
 
 ### `@intFromFloat` out of range is illegal behaviour
 
+Still true in 0.17.0 (safe modes panic: "integer part of floating point value out of bounds").
+
 Not wrapping, not saturating: a panic in safe modes, an arbitrary value in ReleaseFast.
 `std.fmt.parseFloat(f64, "1e999999")` succeeds and returns `inf`, so any parser that turns
 a JSON number into an integer this way can be crashed by a 14-byte document such as
@@ -75,6 +109,8 @@ disable the feature.
 
 ### Cancellation is erased at the `Io.Reader` boundary
 
+Still true in 0.17.0 (`Io.Reader.Error` is unchanged).
+
 `std.Io.Reader.Error` is `{ ReadFailed, EndOfStream }`. Cancelling a future blocked in a
 socket read works (measured: returns in under 1 ms), but code holding a `*std.Io.Reader`
 only sees `error.ReadFailed`. The real cause, `error.Canceled`, is in the concrete
@@ -93,6 +129,8 @@ or its caller has to inspect `.err` after `ReadFailed`. Do not flatten errors in
 
 ### `std.Io.fiber.contextSwitch` miscompiles when inlined
 
+Still true in 0.17.0 (the function is byte-identical).
+
 Its inline asm lists `rsi` (aarch64: `x1`) as output, input and clobber. clang rejects the
 same shape in C; Zig passes it to LLVM, and under register pressure the asm is entered with
 a stale `rsi`, crashing at address `0xaa` in ReleaseSafe. Whether it bites depends on the
@@ -100,12 +138,14 @@ surrounding code, so a small test program does not reproduce it. Tracked upstrea
 Codeberg ziglang/zig issue 35724.
 
 Code that drives fibers directly: use a `noinline` copy of `contextSwitch` whose clobber list
-omits the input register, with a comment naming the issue so it can be removed on the next
-Zig release.
+omits the input register, with a comment naming the issue so it can be removed once a release
+fixes it.
 
 ## Testing and fuzzing
 
 ### Fuzz corpus entries lose their first four bytes
+
+Still true in 0.17.0 (`Smith` decodes input the same way; the fuzzer did not change).
 
 `std.testing.Smith.slice` reads a 4-byte little-endian length from the input before the
 bytes. A raw seed passed as `.corpus = &.{"GET / HTTP/1.1..."}` loses its first four bytes
@@ -116,10 +156,12 @@ to that length, so the seed never reaches the code it was written for.
 - Add a test that decodes each seed through `Smith{ .in = entry }` and asserts it reaches
   the intended branch.
 
-The 0.16 fuzzer explores raw bytes poorly; give harnesses a structured half built from
+The fuzzer explores raw bytes poorly; give harnesses a structured half built from
 `smith.value(T)` and friends. See [std.testing](std-testing.md).
 
 ### Two backends: self-hosted for the edit loop, LLVM for test runs
+
+Still true in 0.17.0. The timings below are from 0.16.0.
 
 A Debug build for x86_64 Linux uses the self-hosted backend; every Release mode, and Debug on
 most other targets, uses LLVM. `builtin.zig_backend` says which one built the code
@@ -177,6 +219,8 @@ const tests = b.addTest(.{ .root_module = mod, .use_llvm = use_llvm });
 
 ### `std.HashMap` never rehashes away its tombstones
 
+Still true in 0.17.0.
+
 `remove` leaves a tombstone and increments `available`; growth is triggered only by
 `available`. A long-lived map with a remove-one-insert-one pattern (a cache under misses)
 never rebuilds, tombstones accumulate until no free slot is left, and every lookup of an
@@ -191,13 +235,12 @@ if (self.removed_since_rehash >= self.map.capacity() / 4) {
 }
 ```
 
-### Without libc, `@memset` is a byte loop
+### `memcmp` and `secureZero` are byte loops
 
-In a binary that does not link libc, `@memset` (and `std.crypto.secureZero`, which is a
-`@memset` over volatile memory, byte-wise even with libc) calls `compiler_rt.memset`, which
-writes one byte at a time: about 18x slower than glibc. In ReleaseSmall `memcpy`/`memmove`
-are byte loops too; `memcmp`/`bcmp` always are. Small calls barely matter. It only bites
-for large blocks on a hot path (measured: zeroing 116 KiB took 33.7 us instead of 1.8 us).
+0.17.0 vectorized `compiler_rt.memset` (byte-wise only in ReleaseSmall), so the 0.16 trap
+"without libc, `@memset` is about 18x slower than glibc" is gone. Still byte loops:
+`compiler_rt`'s `memcmp`/`bcmp`, and `std.crypto.secureZero`, which is a `@memset` over volatile memory. For a large scrub on a hot
+path, zero with volatile vector stores:
 
 ```zig
 // Zero a 32-byte-aligned buffer whose length is a multiple of 32.
@@ -206,12 +249,12 @@ const words: [*]volatile V = @ptrCast(@alignCast(buf.ptr));
 for (0..buf.len / 32) |k| words[k] = @splat(0);
 ```
 
-Both `volatile`s matter: one keeps the stores from being removed as dead, the other stops
-LLVM from recognising the loop as a memset idiom and turning it back into the slow call.
-
 ## Security
 
 ### `std.crypto` leaves key schedules on the stack
+
+Found on 0.16.0; not re-measured on 0.17.0 (the AES code did not change in a way that would
+scrub it).
 
 After a TLS 1.3 handshake, the AES round keys (176-byte `AesEncryptCtx`, round key 0 is
 the raw key) were found at about ten places on the dead stack below the caller.
@@ -224,6 +267,9 @@ pooled OS thread keeps whatever was last written there.
 
 ### `build.zig.zon` facts
 
+Checked on 0.16.0. In 0.17.0 fetched packages are also copied into `zig-pkg/` in the project
+(add it to `.gitignore`).
+
 - `.fingerprint`: the upper 32 bits are the CRC-32 of the package name; the lower 32 are
   an arbitrary id.
 - Unknown fields are ignored, at top level and inside dependency entries. A field ignored
@@ -235,6 +281,8 @@ pooled OS thread keeps whatever was last written there.
   without editing the manifest, which is safer than temporarily switching the pin to `.path`.
 
 ### The self-hosted x86_64 backend cannot encode what the target CPU lacks
+
+Still true in 0.17.0 (same `InvalidInstruction` for `pclmulqdq`, `crc32q`, `aesenc`).
 
 A path chosen at run time by a CPUID check (`pclmulqdq`, the SSE4.2 `crc32`, AES-NI, `pshufb`
 in inline asm) is compiled for every x86_64 target. LLVM assembles it for any CPU model; the
@@ -300,19 +348,8 @@ test "the carry-less multiply path" {
 The same applies to every other gate on such a path: the dispatcher, `available()`-style
 queries and test helpers all test the comptime condition before the run-time one.
 
-### Optimize modes are renamed after 0.16 (0.17-dev only, not in 0.16.0)
+### Fixed in 0.17.0
 
-On the 0.17 development branch `std.builtin.OptimizeMode` is `.debug`, `.safe`, `.fast`,
-`.small`, and the build option reads `-Doptimize=safe`. A `build.zig` that compares against
-`.Debug` or `.ReleaseSafe`, and every script that passes `-Doptimize=ReleaseSafe`, needs
-updating on the upgrade.
-
-### Deleting `.zig-cache/o` wedges the build runner
-
-After deleting only the outputs (`.zig-cache/o/`), every `zig build`, even `zig build -h`,
-fails with `failed to spawn build runner .zig-cache/o/<hash>/build: FileNotFound`, and
-rerunning does not help: the manifests in `.zig-cache/h/` still point at the deleted
-outputs. Tell the user; the fix is to remove the flat manifest files at the top level of
-`.zig-cache/h/` (their outputs are already gone, so nothing extra is rebuilt), then run
-`zig build --list-steps`. Do not work around it with a private `--cache-dir`, which costs
-a second full cache on a disk that just ran out.
+- Deleting `.zig-cache/o` no longer wedges `zig build`: the configurer reruns.
+- `std.testing.allocator` leaks fail the test in ReleaseFast too (0.16 passed them silently).
+- `std.process.getUserInfo(io, name)` compiles and works.

@@ -834,7 +834,7 @@ After writing or modifying Zig code, verify with this sequence:
   works for most x86_64-linux projects)
 - Debug on x86_64 Linux uses the self-hosted backend: 2–6x faster to compile than LLVM, but
   its code runs 2–3x slower. Use it for the edit loop and LLVM (`-fllvm`, `.use_llvm = true`)
-  for test runs — see [0.16 gotchas](references/zig-016-gotchas.md), "Two backends"
+  for test runs — see [gotchas](references/zig-gotchas.md), "Two backends"
 
 ## Common Pitfalls
 
@@ -912,7 +912,7 @@ Load these references when working with specific modules:
 - **[std.enums](references/std-enums.md)** - EnumSet, EnumMap, EnumArray: bit-backed enum collections
 
 ### Allocators
-- **[std.heap](references/std-allocators.md)** - Allocator selection guide, ArenaAllocator, DebugAllocator, FixedBufferAllocator, MemoryPool, SmpAllocator, ThreadSafeAllocator, StackFallbackAllocator, custom allocator implementation
+- **[std.heap](references/std-allocators.md)** - Allocator selection guide, ArenaAllocator, SafeAllocator, FixedBufferAllocator, MemoryPool, SmpAllocator, ThreadSafeAllocator, BufferFirstAllocator, custom allocator implementation
 
 ### I/O & Files
 - **[std.io](references/std-io.md)** - Reader/Writer API (0.15.x): buffered I/O, streaming, binary data, format strings
@@ -944,6 +944,7 @@ Load these references when working with specific modules:
 - **[Zig Patterns](references/patterns.md)** - **Load when writing new code or reviewing code quality.** Comprehensive best practices extracted from the Zig standard library: quick patterns (memory/allocators, file I/O, HTTP, JSON, testing, build system) plus idiomatic code patterns covering syntax (closures, context pattern, options structs, destructuring), polymorphism (duck typing, generics, custom formatting, dynamic/static dispatch), safety (diagnostics, error payloads, defer/errdefer, compile-time assertions), and performance (const pointer passing)
 - **[Production Patterns](references/production-patterns.md)** - **Load when building large-scale Zig systems or optimizing performance.** Real-world patterns from Bun, Ghostty, TigerBeetle: modular build systems, CPU feature locking, pre-allocated message pools, counting allocators, SIMD with scalar fallback, intrusive linked lists, cache-line aligned SoA, work-stealing thread pools, SmolStr (15-byte SSO), comptime string maps, EnumUnionType generation, VOPR fuzzing, snapshot testing, edge-biased fuzz generation, platform abstraction facades, Objective-C bridges, opaque C wrappers with RAII, packed struct bitfields, Result union types, radix sort, tournament trees
 - **[MCP Server Patterns](references/mcp-server-patterns.md)** - **Load when building MCP servers, LSP bridges, JSON-RPC services, or protocol translators in Zig.** Patterns from zig-mcp: newline-delimited vs Content-Length transport, thread-based request correlation with ResetEvent, arena-per-request memory, child process lifecycle with pipe ownership transfer, tool registry with function pointers, std.json.Stringify for manual JSON building, lazy document sync with double-check locking, graceful degradation, auto-reconnect on crash, comptime schema generation, file URI encoding, common serialization gotchas
+- **[Gotchas](references/zig-gotchas.md)** - **Load when debugging code that compiles but misbehaves, or before a release.** Traps found in production code, each with its 0.17.0 status: what 0.17 changed silently (@bitCast arrays, @hasDecl, containsAtLeastScalar, SafeAllocator RSS), tuple swap, generic struct identity, @intFromFloat range, cancellation behind Io.Reader, fiber contextSwitch, fuzz corpus length prefix, self-hosted vs LLVM backend, HashMap tombstones, byte-loop memcmp/secureZero, key schedules on the stack, build.zig.zon facts
 - **[Code Review](references/code-review.md)** - **Load when reviewing Zig code.** Systematic checklist organized by confidence level: ALWAYS FLAG (removed features, changed syntax, API changes), FLAG WITH CONTEXT (exception safety bugs, missing flush, allocator issues), SUGGEST (style improvements). Includes migration examples for 0.14/0.15 breaking changes
 
 ### Serialization

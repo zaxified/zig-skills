@@ -1,4 +1,4 @@
-# Zig Code Review Reference (0.16.0)
+# Zig Code Review Reference (0.17.0)
 
 Systematic code review checklist organized by detection confidence level. Work through sections in order: ALWAYS FLAG → FLAG WITH CONTEXT → SUGGEST.
 
@@ -61,6 +61,23 @@ These are **objective errors** that will cause compilation failures or guarantee
 | `@setCold(true/false)` | `@branchHint(.cold)` | Compile error |
 | `@setAlignStack()` | `callconv(.withStackAlign(...))` | Compile error |
 | `std.BoundedArray` | `ArrayList.initBuffer()` | Compile error |
+| `[_]T{x} ** n` (array repetition) | `const a: [n]T = @splat(x);` | Compile error (0.17) |
+| `errdefer \|err\| ...` | `catch \|err\|` in a wrapper function | Compile error (0.17) |
+| `@cImport` / `@cInclude` / `@cDefine` | `translate-c` package in `build.zig` | Compile error (0.17) |
+| `@Type(.{ ... })` | `@Int`, `@Struct`, `@Union`, `@Enum`, `@Pointer`, `@Fn`, `@Tuple` | Compile error (0.16) |
+| `@typeInfo(T).@"struct".fields` / `.decls` | `.field_names`, `.field_types`, `.field_attrs`, `.decl_names` | Compile error (0.17) |
+| `void{}`, `i0` | `{}`, `u0` | Compile error (0.17) |
+
+**0.17 changes that still compile — flag them too:**
+- `@bitCast` between an array/vector and an integer on a big-endian target: the result changed
+  (logical bits, endian-agnostic).
+- `@hasDecl(T, "name")` on a non-`pub` declaration is now `false`, even within the same file.
+- `std.mem.containsAtLeastScalar(T, list, a, b)` — the third argument is now the element and
+  the fourth the minimum count; a call written for 0.16 may still compile.
+- `@intFromEnum` / `@enumFromInt`, `std.builtin`, `std.heap.DebugAllocator`, `std.fmt.allocPrint`,
+  `std.fmt.bufPrint`, `std.mem.indexOf*` — deprecated, to be removed; use `@backingInt` /
+  `@fromBackingInt`, `std.lang`, `SafeAllocator` (or `init.gpa`), `allocator.print`,
+  `std.mem.print`, `std.mem.find*`.
 
 **Examples:**
 

@@ -1,4 +1,4 @@
-# std.io - I/O API Reference (0.15.x → 0.16, + 0.17-dev std.Io entry points)
+# std.io - I/O API Reference (0.15.x → 0.16, valid in 0.17.0)
 
 New buffered I/O API introduced in Zig 0.15.x ("Writergate"). Non-generic, buffer-integrated Reader and Writer interfaces.
 
@@ -388,11 +388,11 @@ if (maybe_line) |line| {
 }
 ```
 
-## 0.17-dev: Io instance, `main`, args, file read, timing
+## Io instance, `main`, args, file read, timing (since 0.16)
 
-The 0.17 dev branch (master) threads an `Io` instance through the program (the std.Io
-refactor). `Dir`/`File` moved from `std/fs/` to `std/Io/`; `std.time.Timer` and
-`std.process.argsAlloc` were **removed**. Verified on `0.17.0-dev` (anyzig `zig master`).
+Since 0.16 an `Io` instance is threaded through the program (the std.Io refactor).
+`Dir`/`File` moved from `std/fs/` to `std/Io/`; `std.time.Timer` and
+`std.process.argsAlloc` were **removed**. Unchanged in 0.17.0.
 
 ### Program entry — `main` takes `std.process.Init`
 

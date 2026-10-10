@@ -524,14 +524,17 @@ std.debug.print("Total RAM: {d} bytes\n", .{total});
 
 ### User Information (POSIX only)
 
-> **Broken in 0.16.0.** Both `std.process.getUserInfo(name)` and
-> `std.process.posixGetUserInfo(io, name)` fail to compile in the 0.16.0 standard
-> library (internal call-site bugs: `getUserInfo` calls `posixGetUserInfo` with
-> the wrong argument count, and `posixGetUserInfo` calls `File.reader` with the
-> wrong argument count). There is currently no working public idiom. The intended
-> signature is `posixGetUserInfo(io, name) !UserInfo` returning
-> `.{ .uid, .gid }`; until it is fixed upstream, read and parse `/etc/passwd`
-> yourself if you need this. Watch for a fix in a later 0.16.x release.
+Looks a user up in `/etc/passwd` (no NSS, so LDAP/SSSD users are not found). Broken in
+0.16.0 (did not compile), fixed in 0.17.0.
+
+```zig
+const std = @import("std");
+
+pub fn main(init: std.process.Init) !void {
+    const info = try std.process.getUserInfo(init.io, "root");
+    std.debug.print("uid={d} gid={d}\n", .{ info.uid, info.gid });
+}
+```
 
 ### Raise File Descriptor Limit
 

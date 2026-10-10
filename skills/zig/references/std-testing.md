@@ -93,7 +93,7 @@ try testing.expectFmt("hello world", "{s} {s}", .{"hello", "world"});
 
 ## Testing Allocator
 
-`std.testing.allocator` is a `DebugAllocator` (formerly `GeneralPurposeAllocator`) that detects memory leaks and use-after-free. **Only available in test builds.**
+`std.testing.allocator` is a `std.heap.SafeAllocator` (0.17; `DebugAllocator` before) that detects memory leaks, double frees and use-after-free. **Only available in test builds.** It never reuses memory, so a test that allocates a lot grows in RSS, and since 0.17 a leak fails the test in every optimize mode, ReleaseFast included.
 
 ```zig
 test "with allocator" {
@@ -294,9 +294,9 @@ test "deterministic random" {
 
 ## Fuzz Testing
 
-**0.17.0-dev signature change:** `testOne` receives a `*std.testing.Smith`
-value generator, **not** a `[]const u8`. Older examples (including most
-training data) will not compile.
+**Since 0.16:** `testOne` receives a `*std.testing.Smith` value generator,
+**not** a `[]const u8`. Older examples (including most training data) will not
+compile. The fuzzer itself is unchanged in 0.17.0.
 
 ```zig
 // A doc comment cannot be attached to a test -- `///` here is a compile error.

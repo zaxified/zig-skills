@@ -178,7 +178,7 @@ fn fuzzOne(_: void, smith: *std.testing.Smith) !void {
 `smith.eosWeightedSimple(a, b)` (each has a `...WithHash` variant taking an
 explicit call-site hash). `FuzzInputOptions` is `.{ .corpus = &.{...} }`.
 `slice` reads a 4-byte length before the bytes, so a raw corpus seed loses its
-first four bytes; see [zig-016-gotchas.md](zig-016-gotchas.md).
+first four bytes; see [zig-gotchas.md](zig-gotchas.md).
 
 **A doc comment cannot be attached to a `test`** — `///` above it is a compile
 error. Use `//`.

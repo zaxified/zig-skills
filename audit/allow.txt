@@ -9,5 +9,5 @@ skills/zig/references/std-fs.md	command	b422f2d1c92aca07	std.Io.Dir API referenc
 skills/zig/references/std-fs.md	command	0842708a44a7aef2	std.Io.Dir API reference; relative name inside a Dir the caller opened.
 skills/zig/references/std-fs.md	command	9706eb33cd74dde1	std.Io.Dir API reference; relative name inside a Dir the caller opened.
 skills/zig/references/std-net.md	command	8f5e905577d53ecb	Removes the example's own Unix socket file in /tmp on exit.
-skills/zig/references/std-process.md	command	c1a1e657a3c6c019	Reading world-readable /etc/passwd to look up a uid; no write, no credentials.
+skills/zig/references/std-process.md	command	0a53a8aef0396f2b	Describes std.process.getUserInfo, which reads world-readable /etc/passwd to look up a uid; no write, no credentials.
 README.md	command	7d6b31a6207ce06d	Human install instructions naming a repository skills directory as the install target; no command writes there.
