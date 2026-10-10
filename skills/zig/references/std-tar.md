@@ -108,7 +108,7 @@ Extract entire archive to a directory:
 const data = @embedFile("archive.tar");
 var reader: std.Io.Reader = .fixed(data);
 
-try std.tar.extract(std.Io.Dir.cwd(), &reader, .{
+try std.tar.extract(io, std.Io.Dir.cwd(), &reader, .{
     .strip_components = 1,        // remove leading path component
     .mode_mode = .executable_bit_only,
     .exclude_empty_directories = false,
@@ -124,7 +124,7 @@ defer file.close(io);
 var buf: [4096]u8 = undefined;
 var file_reader = file.reader(io, &buf);
 
-try std.tar.extract(output_dir, &file_reader.interface, .{});
+try std.tar.extract(io, output_dir, &file_reader.interface, .{});
 ```
 
 ### PipeOptions
@@ -252,7 +252,7 @@ Collect errors instead of failing immediately:
 var diagnostics: std.tar.Diagnostics = .{ .allocator = allocator };
 defer diagnostics.deinit();
 
-std.tar.extract(dir, &reader, .{
+std.tar.extract(io, dir, &reader, .{
     .diagnostics = &diagnostics,
 }) catch |err| {
     // Some errors are still fatal
@@ -315,7 +315,7 @@ fn extractTar(allocator: Allocator, tar_data: []const u8, dest: std.Io.Dir) !voi
     var diagnostics: std.tar.Diagnostics = .{ .allocator = allocator };
     defer diagnostics.deinit();
 
-    try std.tar.extract(dest, &reader, .{
+    try std.tar.extract(io, dest, &reader, .{
         .strip_components = 1,
         .diagnostics = &diagnostics,
     });

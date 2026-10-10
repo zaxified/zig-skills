@@ -2,7 +2,7 @@
 
 Dynamic array (vector) that grows as needed.
 
-**Note:** `std.ArrayListUnmanaged` is now deprecated - use `std.ArrayList` (same type, unmanaged is now the default pattern in Zig 0.15.x).
+**Note:** `std.ArrayListUnmanaged` is now deprecated - use `std.ArrayList` (same type; unmanaged has been the default since Zig 0.15).
 
 ## Initialization
 

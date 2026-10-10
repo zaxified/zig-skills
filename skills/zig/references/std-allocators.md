@@ -464,7 +464,7 @@ const str = try allocator.allocSentinel(u8, len, 0);
 defer allocator.free(str);
 
 // Duplicate with sentinel
-const c_str = try allocator.dupeSentinel(u8, "hello", 0); // dupeZ is deprecated  // [:0]u8
+const c_str = try allocator.dupeSentinel(u8, "hello", 0); // [:0]u8 (dupeZ is deprecated)
 defer allocator.free(c_str);
 ```
 

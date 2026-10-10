@@ -243,7 +243,7 @@ std.mem.max(i32, &slice)          // 5
 std.mem.minMax(i32, &slice)       // .{ 1, 5 }
 
 std.mem.findMin(i32, &slice)   // 1
-std.mem.indexOfMax(i32, &slice)   // 4
+std.mem.findMax(i32, &slice)   // 4
 std.mem.findMinMax(i32, &slice) // .{ 1, 4 }
 ```
 
