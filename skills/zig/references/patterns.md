@@ -207,7 +207,7 @@ test "example" {
 }
 
 test "with allocator" {
-    var list: std.ArrayListUnmanaged(u32) = .empty;
+    var list: std.ArrayList(u32) = .empty;
     defer list.deinit(testing.allocator);
     try list.append(testing.allocator, 42);
 }
@@ -515,18 +515,18 @@ Use multiple `AutoArrayHashMapUnmanaged` fields when storing complex interned da
 
 ```zig
 // From llvm/Builder.zig - demonstrating the pattern of parallel maps for interned data
-string_map: std.AutoArrayHashMapUnmanaged(void, void),
-string_indices: std.ArrayListUnmanaged(u32),
-string_bytes: std.ArrayListUnmanaged(u8),
+string_map: std.array_hash_map.Auto(void, void),
+string_indices: std.ArrayList(u32),
+string_bytes: std.ArrayList(u8),
 
-types: std.AutoArrayHashMapUnmanaged(String, Type),
-type_map: std.AutoArrayHashMapUnmanaged(void, void),
-type_items: std.ArrayListUnmanaged(Type.Item),
-type_extra: std.ArrayListUnmanaged(u32),
+types: std.array_hash_map.Auto(String, Type),
+type_map: std.array_hash_map.Auto(void, void),
+type_items: std.ArrayList(Type.Item),
+type_extra: std.ArrayList(u32),
 
-attributes: std.AutoArrayHashMapUnmanaged(Attribute.Storage, void),
-attributes_map: std.AutoArrayHashMapUnmanaged(void, void),
-attributes_indices: std.ArrayListUnmanaged(u32),
+attributes: std.array_hash_map.Auto(Attribute.Storage, void),
+attributes_map: std.array_hash_map.Auto(void, void),
+attributes_indices: std.ArrayList(u32),
 ```
 
 **When to use:** Interning strings/symbols, IR builders, AST storage, deduplication with stable indices.
@@ -767,14 +767,14 @@ Implement `jsonParse`, `jsonParseFromValue`, and `jsonStringify` for JSON suppor
 ```zig
 pub fn ArrayHashMap(comptime T: type) type {
     return struct {
-        map: std.StringArrayHashMapUnmanaged(T) = .empty,
+        map: std.array_hash_map.String(T) = .empty,
 
         pub fn jsonParse(
             allocator: Allocator,
             source: anytype,
             options: ParseOptions,
         ) !@This() {
-            var map: std.StringArrayHashMapUnmanaged(T) = .empty;
+            var map: std.array_hash_map.String(T) = .empty;
             errdefer map.deinit(allocator);
 
             if (.object_begin != try source.next()) return error.UnexpectedToken;
@@ -1132,7 +1132,7 @@ When individual node deletion is needed, maintain a freelist stack:
 
 ```zig
 pub const NodePool = struct {
-    nodes: std.ArrayListUnmanaged(Node.Data),
+    nodes: std.ArrayList(Node.Data),
     /// Head of freelist, or none if no free slots.
     free_head: OptionalNode = .none,
 
@@ -1170,7 +1170,7 @@ Use a tagged union to attach context to errors.
 
 ```zig
 pub const Diagnostics = struct {
-    errors: std.ArrayListUnmanaged(Error) = .empty,
+    errors: std.ArrayList(Error) = .empty,
     entries: usize = 0,
 
     pub const Error = union(enum) {

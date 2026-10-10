@@ -5,6 +5,8 @@ The published content is `skills/zig/` (Markdown only) plus `.claude-plugin/`, t
 
 ## Rules
 
+- This is the `release/0.16` maintenance branch (skill `zig`); `main` targets 0.17.0 (skill
+  `zig-0.17`). Fixes only, no 0.17 content here.
 - The target is **Zig 0.16.0 as released**. Verify every API claim against the 0.16.0 std
   source or by compiling it; never from memory or from another version's docs. Mark
   anything newer as "0.17-dev only, not in 0.16.0".
@@ -29,6 +31,7 @@ python3 -m unittest discover -s tests
 python3 scripts/audit.py
 python3 scripts/check-std-paths.py      # needs zig 0.16.0 on PATH
 python3 scripts/check-examples.py       # compiles standalone examples; same
+python3 scripts/check-deprecated.py     # no deprecated/removed std name or syntax; same
 ```
 
 ## Releases

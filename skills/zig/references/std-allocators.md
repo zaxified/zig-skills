@@ -328,10 +328,10 @@ _ = pool.reset(.retain_capacity);
 var pool = try std.heap.MemoryPool(T).initPreheated(allocator, 100);
 
 // Custom alignment
-var pool = std.heap.MemoryPoolAligned(T, .@"64").init(allocator);
+var pool = std.heap.memory_pool.Aligned(T, .@"64").init(allocator);
 
 // Non-growable (fixed capacity)
-var pool = try std.heap.MemoryPoolExtra(T, .{ .growable = false }).initPreheated(allocator, 50);
+var pool = try std.heap.memory_pool.Extra(T, .{ .growable = false }).initPreheated(allocator, 50);
 ```
 
 ### ThreadSafeAllocator → SmpAllocator (0.16)
@@ -464,7 +464,7 @@ const str = try allocator.allocSentinel(u8, len, 0);
 defer allocator.free(str);
 
 // Duplicate with sentinel
-const c_str = try allocator.dupeZ(u8, "hello");  // [:0]u8
+const c_str = try allocator.dupeSentinel(u8, "hello", 0); // dupeZ is deprecated  // [:0]u8
 defer allocator.free(c_str);
 ```
 

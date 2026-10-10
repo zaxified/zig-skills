@@ -316,7 +316,7 @@ fn getQueryParam(uri: std.Uri, key: []const u8) ?[]const u8 {
 
     var iter = std.mem.splitScalar(u8, query_str, '&');
     while (iter.next()) |pair| {
-        if (std.mem.indexOfScalar(u8, pair, '=')) |eq_pos| {
+        if (std.mem.findScalar(u8, pair, '=')) |eq_pos| {
             if (std.mem.eql(u8, pair[0..eq_pos], key)) {
                 return pair[eq_pos + 1 ..];
             }
@@ -355,7 +355,7 @@ fn buildUrl(allocator: Allocator, base: []const u8, params: []const [2][]const u
             if (isUnreserved(c)) {
                 try result.append(allocator, c);
             } else {
-                try result.appendSlice(allocator, try std.fmt.allocPrint(allocator, "%{X:0>2}", .{c}));
+                try result.print(allocator, "%{X:0>2}", .{c}); // formats in place, nothing to free
             }
         }
 
@@ -366,7 +366,7 @@ fn buildUrl(allocator: Allocator, base: []const u8, params: []const [2][]const u
             if (isUnreserved(c)) {
                 try result.append(allocator, c);
             } else {
-                try result.appendSlice(allocator, try std.fmt.allocPrint(allocator, "%{X:0>2}", .{c}));
+                try result.print(allocator, "%{X:0>2}", .{c}); // formats in place, nothing to free
             }
         }
     }

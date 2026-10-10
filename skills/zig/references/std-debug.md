@@ -394,8 +394,12 @@ std.debug.print("{s}:{d}: {s}\n", .{
 ## Constants
 
 ```zig
-// Whether runtime safety checks are enabled
-std.debug.runtime_safety  // true in Debug/ReleaseSafe
+// Whether runtime safety checks are enabled in YOUR module (std.debug.runtime_safety is
+// deprecated: it reports the standard library's mode, not the caller's)
+const safety_on = switch (@import("builtin").mode) {
+    .Debug, .ReleaseSafe => true,
+    .ReleaseFast, .ReleaseSmall => false,
+};
 
 // Whether platform can produce stack traces
 std.debug.sys_can_stack_trace  // false on WASM, MIPS, etc.

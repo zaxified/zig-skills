@@ -108,10 +108,10 @@ const Level = enum {
 
 For faster compression without LZ77 match searching:
 
-```zig
-const HuffmanEncoder = flate.HuffmanEncoder;
-// Used internally for Huffman-only encoding (bigger output, faster compression)
-```
+`flate.Compress.Huffman` (Huffman coding only) exists, but in 0.16.0 its `finish` is not
+`pub`, and `writer.flush()` writes neither the final block nor the gzip/zlib footer — a stream
+cannot be completed, and decompressing it fails with `error.ReadFailed`. Use `flate.Compress`
+in 0.16 (0.17.0 makes `Huffman.finish` public).
 
 ## Zstandard
 

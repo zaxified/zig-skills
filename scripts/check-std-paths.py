@@ -36,7 +36,7 @@ BAD_MARK = re.compile(
 # "// Before:"). Anywhere in the comment, a word like "before" in ordinary
 # prose silently switched off checking for the rest of the block.
 WRONG_LINE = re.compile(r"^\s*//+\s*(?:[-*(\[]\s*)?(WRONG|BAD\b|❌|OLD\b|Old\b|Before\b|0\.1[45]\b|Removed\b|removed\b|Deprecated\b)")
-RIGHT_LINE = re.compile(r"^\s*//+\s*(?:[-*(\[]\s*)?(CORRECT|GOOD\b|✅|0\.16\b|New\b|After\b|Now\b)")
+RIGHT_LINE = re.compile(r"^\s*//+\s*(?:[-*(\[]\s*)?(CORRECT|GOOD\b|✅|0\.1[67]\b|New\b|After\b|Now\b)")
 # Paths that only exist on another OS, target or behind a build option.
 IGNORE = re.compile(r"^(os\.windows|os\.wasi|os\.uefi|os\.plan9|Target\.\w+\.cpu)")
 
@@ -122,18 +122,56 @@ def arity_findings():
     return out
 
 
+# `const ascii = std.ascii;` anywhere in a file: later blocks of that file often use the alias
+# without repeating the declaration, so the alias is resolved file-wide.
+ALIAS = re.compile(r"\bconst\s+([a-z_]\w*)\s*=\s*std((?:\.[A-Za-z_]\w*)+)\s*;")
+
+
+LOCAL = re.compile(r"\b(?:const|var)\s+([a-z_]\w*)\s*(?::[^=]*)?=")
+
+
+def aliases(text):
+    """Aliases declared in correct-code blocks of a file (a WRONG block's names do not count)."""
+    out = {}
+    for m in BLOCK.finditer(text):
+        if skip_block(text, m):
+            continue
+        for line in usable_lines(m.group(1)):
+            for a in ALIAS.finditer(line):
+                out.setdefault(a.group(1), a.group(2))
+    return out
+
+
+def block_table(block, table):
+    """A name the block itself binds to something else shadows the file-wide alias."""
+    own = {a.group(1) for a in ALIAS.finditer(block)}
+    shadowed = {m.group(1) for m in LOCAL.finditer(block)} - own
+    return {k: v for k, v in table.items() if k not in shadowed}
+
+
+def expand(code, table):
+    """Rewrite `alias.x` (not `.alias.x`, not `foo_alias.x`) to `std.<path>.x`."""
+    for name, path in table.items():
+        code = re.sub(r"(?<![\w.])" + re.escape(name) + r"\.(?=[A-Za-z_@])", "std" + path + ".", code)
+    return code
+
+
 def collect():
     found = {}  # path -> first "file:line"
     for f in sorted(glob.glob(os.path.join(SKILL, "**", "*.md"), recursive=True)):
         text = open(f, encoding="utf-8").read()
+        table = aliases(text)
         for m in BLOCK.finditer(text):
             if skip_block(text, m):
                 continue
             line0 = text.count("\n", 0, m.start()) + 2
+            btable = block_table(m.group(1), table)
             for line in usable_lines(m.group(1)):
                 if line.lstrip().startswith("//"):
                     continue
-                for p in PATH.finditer(line.split("//")[0]):
+                if ALIAS.search(line):
+                    continue  # the declaration itself is checked through its own std path
+                for p in PATH.finditer(expand(line.split("//")[0], btable)):
                     segs = re.findall(r'[A-Za-z_]\w*|@"[^"]+"', p.group(1))
                     path = ".".join(segs)
                     if IGNORE.match(path):
@@ -184,8 +222,9 @@ def zig_source(paths):
     out = [ZIG_PRELUDE]
     for path in sorted(paths):
         names = ", ".join('"%s"' % s.removeprefix('@"').removesuffix('"') for s in path.split("."))
+        shown = path.replace("\\", "\\\\").replace('"', '\\"')  # quoted names: @"CRC-32/ISO-HDLC"
         out.append(
-            f'comptime {{ if (missing(&.{{ {names} }})) |n| @compileError("missing: std.{path} (at ." ++ n ++ ")"); }}'
+            f'comptime {{ if (missing(&.{{ {names} }})) |n| @compileError("missing: std.{shown} (at ." ++ n ++ ")"); }}'
         )
     return "\n".join(out) + "\n"
 
@@ -210,7 +249,8 @@ def main():
              "--global-cache-dir", os.path.join(d, "g")],
             capture_output=True, text=True,
         )
-    missing = sorted(set(re.findall(r"missing: std\.([\w.@\"]+)", r.stderr)))
+    # The error line and its echoed source line both carry the path; the echo is escaped.
+    missing = sorted({m.replace('\\"', '"') for m in re.findall(r"missing: std\.(\S+) \(at \.", r.stderr)})
     for p in missing:
         print(f"std.{p}\t{found.get(p, '?')}")
     other = [l for l in r.stderr.splitlines() if "error:" in l and "missing: std." not in l]

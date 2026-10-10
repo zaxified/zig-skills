@@ -2,7 +2,7 @@
 
 File system operations in Zig 0.16. Covers files, directories, iteration, atomic writes, and paths.
 
-**0.16 change:** almost everything that used to live under `std.fs` moved to `std.Io.Dir` / `std.Io.File`, and nearly every method now takes an `io: Io` argument (obtained from an `Io` implementation, e.g. `var threaded: std.Io.Threaded = .init(gpa, .{}); const io = threaded.io();`), because the actual read/write/open syscalls go through it. Only `std.fs.path` (pure path-string manipulation, no I/O) is unchanged.
+**0.16 change:** almost everything that used to live under `std.fs` moved to `std.Io.Dir` / `std.Io.File`, and nearly every method now takes an `io: Io` argument (obtained from an `Io` implementation, e.g. `var threaded: std.Io.Threaded = .init(gpa, .{}); const io = threaded.io();`), because the actual read/write/open syscalls go through it. Only `std.Io.Dir.path` (pure path-string manipulation, no I/O) is unchanged.
 
 ## Table of Contents
 - [Module Structure](#module-structure)
@@ -19,7 +19,7 @@ File system operations in Zig 0.16. Covers files, directories, iteration, atomic
 std.Io.File      // File handle and I/O operations (was std.fs.File)
 std.Io.Dir       // Directory handle and operations (was std.fs.Dir)
 std.Io.File.Atomic // Safe file writes with atomic rename/replace (was std.fs.AtomicFile)
-std.fs.path      // Path manipulation utilities (unchanged, pure functions)
+std.Io.Dir.path      // Path manipulation utilities (unchanged, pure functions)
 std.Io.Dir.cwd() // Current working directory handle (was std.fs.cwd())
 ```
 
@@ -302,10 +302,10 @@ try atomic.replace(io);  // atomically replace an existing file
 
 ## Path Manipulation
 
-`std.fs.path` is unchanged in 0.16 — pure string manipulation, no I/O:
+`std.Io.Dir.path` is unchanged in 0.16 — pure string manipulation, no I/O:
 
 ```zig
-const path = std.fs.path;
+const path = std.Io.Dir.path;
 
 // Join path components
 const full = try path.join(allocator, &.{ "dir", "subdir", "file.txt" });
@@ -398,7 +398,7 @@ fn copyTree(io: std.Io, allocator: Allocator, src: std.Io.Dir, dest: std.Io.Dir)
         if (entry.kind == .directory) {
             try dest.createDirPath(io, entry.path);
         } else if (entry.kind == .file) {
-            if (std.fs.path.dirname(entry.path)) |parent| {
+            if (std.Io.Dir.path.dirname(entry.path)) |parent| {
                 try dest.createDirPath(io, parent);
             }
             try std.Io.Dir.copyFile(entry.dir, entry.basename, dest, entry.path, io, .{});

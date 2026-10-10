@@ -593,7 +593,7 @@ pub const MTLResourceOptions = packed struct(c_ulong) {
     cpu_cache_mode: CPUCacheMode = .default,
     storage_mode: StorageMode,
     hazard_tracking_mode: HazardTrackingMode = .default,
-    _pad: @Type(.{ .int = .{ .signedness = .unsigned, .bits = @bitSizeOf(c_ulong) - 10 } }) = 0,
+    _pad: @Int(.unsigned, @bitSizeOf(c_ulong) - 10) = 0,
 
     pub const StorageMode = enum(u4) { shared = 0, managed = 1, private = 2, memoryless = 3 };
 };
@@ -636,15 +636,15 @@ pub fn EnumUnionType(
     comptime Enum: type,
     comptime TypeForVariant: fn (comptime variant: Enum) type,
 ) type {
-    var fields: [std.enums.values(Enum).len]std.builtin.Type.UnionField = undefined;
-    for (std.enums.values(Enum), 0..) |variant, i| {
-        fields[i] = .{
-            .name = @tagName(variant),
-            .type = TypeForVariant(variant),
-            .alignment = @alignOf(TypeForVariant(variant)),
-        };
+    const variants = std.enums.values(Enum);
+    var names: [variants.len][]const u8 = undefined;
+    var types: [variants.len]type = undefined;
+    for (variants, 0..) |variant, i| {
+        names[i] = @tagName(variant);
+        types[i] = TypeForVariant(variant);
     }
-    return @Type(.{ .@"union" = .{ .layout = .auto, .fields = &fields, .decls = &.{}, .tag_type = Enum } });
+    // Default attributes: natural alignment for every field.
+    return @Union(.auto, Enum, &names, &types, &@splat(.{}));
 }
 ```
 

@@ -113,6 +113,8 @@ jobs:
         run: python3 scripts/check-std-paths.py
       - name: Every standalone example compiles on Zig 0.16.0
         run: python3 scripts/check-examples.py
+      - name: No correct example uses a name Zig 0.16.0 deprecates or removed
+        run: python3 scripts/check-deprecated.py
 
   release:
     name: Release record

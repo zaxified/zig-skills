@@ -443,7 +443,7 @@ CWD access now takes an `Io`. `getCwd` / `getCwdAlloc` were renamed to
 
 ```zig
 // Into a provided buffer; returns the number of bytes written.
-var buf: [std.fs.max_path_bytes]u8 = undefined;
+var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
 const n = try std.process.currentPath(io, &buf);
 const cwd = buf[0..n];
 _ = cwd;
@@ -547,7 +547,7 @@ const exe = try std.process.executablePathAlloc(io, gpa);
 defer gpa.free(exe);
 
 // Into a buffer; returns the number of bytes written.
-var buf: [std.fs.max_path_bytes]u8 = undefined;
+var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
 const n = try std.process.executablePath(io, &buf);
 const path = buf[0..n];
 _ = path;
@@ -629,13 +629,13 @@ fn getConfigPath(gpa: Allocator, environ: std.process.Environ) ![]const u8 {
     // Fall back to XDG.
     if (environ.getAlloc(gpa, "XDG_CONFIG_HOME")) |xdg| {
         defer gpa.free(xdg);
-        return std.fs.path.join(gpa, &.{ xdg, "myapp", "config.json" });
+        return std.Io.Dir.path.join(gpa, &.{ xdg, "myapp", "config.json" });
     } else |_| {}
 
     // Fall back to HOME.
     const home = try environ.getAlloc(gpa, "HOME");
     defer gpa.free(home);
-    return std.fs.path.join(gpa, &.{ home, ".config", "myapp", "config.json" });
+    return std.Io.Dir.path.join(gpa, &.{ home, ".config", "myapp", "config.json" });
 }
 ```
 

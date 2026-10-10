@@ -1,6 +1,6 @@
 ---
 name: zig
-description: "Up-to-date Zig 0.16.0 patterns, checked against the released standard library. Use when writing, reviewing, or debugging Zig code, build.zig and build.zig.zon files, or comptime metaprogramming. Prevents outdated patterns from training data: the std.Io instance threaded through files, sockets, clocks and locks (std.fs to std.Io.Dir/File, std.net to std.Io.net, std.time timestamps and Timer to std.Io.Clock, std.Thread.Mutex/Condition/Pool to std.Io.Mutex/Condition/Group, std.crypto.random to io.randomSecure), main(init: std.process.Init), build system APIs (root_module, Compile methods to Module methods), buffered Reader/Writer with flush, container initialization (.empty/.init), unmanaged ArrayList and HashMap, DebugAllocator, lowercase @typeInfo fields, removed async/await and usingnamespace; plus gotchas found in production code."
+description: "Up-to-date Zig 0.16.0 patterns, checked against the released standard library. Use when writing, reviewing, or debugging Zig code for Zig 0.16.x (zig version / minimum_zig_version in build.zig.zon; a 0.17 project uses the zig-0.17 skill instead), build.zig and build.zig.zon files, or comptime metaprogramming. Prevents outdated patterns from training data: the std.Io instance threaded through files, sockets, clocks and locks (std.fs to std.Io.Dir/File, std.net to std.Io.net, std.time timestamps and Timer to std.Io.Clock, std.Thread.Mutex/Condition/Pool to std.Io.Mutex/Condition/Group, std.crypto.random to io.randomSecure), main(init: std.process.Init), build system APIs (root_module, Compile methods to Module methods), buffered Reader/Writer with flush, container initialization (.empty/.init), unmanaged ArrayList and HashMap, DebugAllocator, lowercase @typeInfo fields, removed async/await and usingnamespace; plus gotchas found in production code."
 license: MIT
 compatibility:
   - claude-code
@@ -461,18 +461,12 @@ var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
 ```
 
 ### ArrayList: Unmanaged by Default
-The old `std.ArrayList` (with allocator stored in struct) is now `std.array_list.Managed`.
-The new `std.ArrayList` is **unmanaged** — no allocator field, pass allocator to every method:
+`std.ArrayList` is **unmanaged** — no allocator field, pass the allocator to every method that
+allocates or frees. The managed variant `std.array_list.Managed` is deprecated.
 ```zig
-// NEW default: unmanaged (no allocator field)
 var list: std.ArrayList(u32) = .empty;
+defer list.deinit(allocator);
 try list.append(allocator, 42);
-list.deinit(allocator);
-
-// If you want old behavior (allocator in struct), use Managed:
-var list = std.array_list.Managed(u32).init(allocator);
-try list.append(42);  // no allocator arg needed
-list.deinit();
 ```
 
 ### HashMap: Managed vs Unmanaged
