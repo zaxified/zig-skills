@@ -472,7 +472,7 @@ pub const ParseError = error{
     UnexpectedCharacter,  // Invalid character in URI component
     InvalidFormat,        // Malformed URI structure
     InvalidPort,          // Port not a valid u16
-    InvalidHostName,      // 0.17: host is not a valid host name
+    InvalidHostName,      // host is not a valid host name
 };
 ```
 
