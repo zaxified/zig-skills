@@ -55,6 +55,16 @@ and `-OReleaseSafe` still work — keep the old spellings in scripts that must a
 - **The first `zig build` after installing 0.17 compiles the maker** (measured: about
   115 s on an 8-core x86_64 Linux machine, once per toolchain and global cache). A fresh CI runner pays it on every job unless
   the global cache (`~/.cache/zig`) is cached.
+- **Cache manifests in `.zig-cache/h/` are binary.** A script that parsed them as text (a
+  coverage or cache-inspection tool) breaks; `zig cache-cat <path>` prints one as ZON.
+- **LLVM 22.** Code generation changed: redo constant-time checks of the binary (valgrind
+  taint, objdump) and benchmark baselines. Loop vectorization is still disabled, as in 0.16.
+- **Known 0.17.0 regressions** (release notes): response files in `std.Build.Step.Run`
+  (#36444, a casualty of the configurer/maker split), `std.debug.simple_panic` does not
+  compile (#36986), weak symbols of Zig's libc cannot reliably be overridden, soft-float
+  compiler-rt on x86 (#37006), SPIR-V (#37050).
+- **`std.Io.Uring` has no networking** (`netListenIp`, `netAccept`, `netConnectIp` return
+  `…Unavailable`) and there is no epoll backend; network servers stay on `std.Io.Threaded`.
 - **`ArrayList` gained `pointer_stability`** (a `std.debug.SafetyLock`). A field-by-field
   literal stops compiling; `.empty` and `initBuffer` are unaffected. `lockPointers()` /
   `unlockPointers()` make any growth while a pointer into the list is held trip an assertion

@@ -110,7 +110,8 @@ of `decls`, `error_set.error_names`. `std.meta.fields` is a compile error; `fiel
 ### Silent changes (compile, behave differently)
 - **`@bitCast` reinterprets logical bits.** Arrays and vectors now behave as little-endian on
   every target. A cast of an `extern struct`/`extern union` is a **compile error** — for type
-  punning use `@ptrCast` (`const p: *align(1) const u16 = @ptrCast(&bytes);`) or an extern union.
+  punning use `@ptrCast` (`const p: *align(1) const u16 = @ptrCast(&bytes);`), an extern union,
+  or, for bytes into a C struct, `std.mem.bytesToValue(std.posix.sockaddr.in, bytes[0..@sizeOf(std.posix.sockaddr.in)])`.
 - **`@hasDecl` sees only `pub` declarations**, also from inside the same file.
 - **`std.mem.containsAtLeastScalar(T, list, element, minimum)`** — `element` and `minimum`
   swapped places; old calls with an integer element still compile.
@@ -195,6 +196,22 @@ run_cmd.addPassthruArgs();   // forwards `zig build run -- a b c`
 - Debug on x86_64 Linux still uses the self-hosted backend; release modes use LLVM;
   `.use_llvm = true` on a compile step, or `-fllvm`, forces LLVM in Debug (unchanged).
 - `-fformatted-panics` / `-fno-formatted-panics` are gone.
+
+### Moving a 0.16 project
+1. Pin the toolchain (`minimum_zig_version = "0.17.0"`, CI) and cache the global cache in CI.
+2. Parse first: `zig ast-check` every file — array `**`, `errdefer |e|`, `void{}`, `@cImport`
+   stop at the parser.
+3. `zig fmt` rewrites `@intFromEnum`/`@enumFromInt`; the rest is by hand: struct-of-arrays
+   `@typeInfo`, `@bitCast` into extern structs, optimize-mode comparisons in `build.zig`,
+   `b.args`, `b.build_root`, configure-time I/O (declare it), bit_set and zon renames.
+4. Audit what still compiles: every `@bitCast` of an array/vector, every `@hasDecl` on a
+   private declaration, `containsAtLeastScalar` calls.
+5. Re-measure: constant-time checks and benchmarks (LLVM 22).
+
+Can land on 0.16 first, working on both: `**` → `@splat`, `@bitCast` into extern structs →
+`@ptrCast`/`bytesToValue`, dropping `std.meta.fields`, `ArrayList` literals → `.empty`. Not
+before the switch: removing `try` from `X25519.KeyPair.generateDeterministic` (0.16 still
+returns an error union).
 
 ### Incremental compilation
 `zig build -fincremental --watch` rebuilds on every save — but only the **self-hosted**
