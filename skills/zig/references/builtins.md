@@ -552,13 +552,14 @@ Get type of a struct field.
 
 ### @fieldParentPtr
 ```zig
-@fieldParentPtr(field_ptr: anytype, comptime field_name: []const u8) anytype
+@fieldParentPtr(comptime field_name: []const u8, field_ptr: *T) anytype
 ```
 Get pointer to containing struct from field pointer (for intrusive data structures).
 ```zig
 const Node = struct { data: u32, hook: Hook };
 fn getNode(hook: *Hook) *Node {
-    return @fieldParentPtr(hook, "hook");
+    // @alignCast when the parent struct is more aligned than the field's type
+    return @alignCast(@fieldParentPtr("hook", hook));
 }
 ```
 
@@ -699,8 +700,9 @@ Rearrange vector elements using mask.
 ```zig
 const a: @Vector(4, i32) = .{ 1, 2, 3, 4 };
 const b: @Vector(4, i32) = .{ 5, 6, 7, 8 };
-const result = @shuffle(i32, a, b, .{ 0, 4, 1, 5 });  // {1, 5, 2, 6}
-// Positive indices select from a, indices >= len select from b
+const result = @shuffle(i32, a, b, @Vector(4, i32){ 0, ~@as(i32, 0), 1, ~@as(i32, 1) }); // {1, 5, 2, 6}
+// Non-negative indices select from a; negative ones from b (-1 = b[0], so write ~i).
+// An out-of-bounds index is a compile error.
 ```
 
 ### @select

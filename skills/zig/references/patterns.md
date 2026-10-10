@@ -1107,10 +1107,9 @@ pub const Node = enum(u32) {
             return @enumFromInt(@intFromEnum(r.start) + i);
         }
 
-        /// Iterate over all nodes in range.
-        pub fn slice(r: Range) []const Node {
-            // Note: requires nodes stored contiguously
-            return @ptrCast(@as([*]const u32, @ptrFromInt(@intFromEnum(r.start)))[0..r.len]);
+        /// The range as a slice of the backing storage (a node index is not an address).
+        pub fn slice(r: Range, nodes: []const Node.Data) []const Node.Data {
+            return nodes[@intFromEnum(r.start)..][0..r.len];
         }
     };
 };
@@ -1136,7 +1135,7 @@ pub const NodePool = struct {
     /// Head of freelist, or none if no free slots.
     free_head: OptionalNode = .none,
 
-    pub fn alloc(self: *NodePool) !Node {
+    pub fn alloc(self: *NodePool, gpa: std.mem.Allocator) !Node {
         if (self.free_head.unwrap()) |free| {
             // Reuse freed slot
             self.free_head = self.nodes.items[@intFromEnum(free)].next_free;
@@ -1144,7 +1143,7 @@ pub const NodePool = struct {
         }
         // Allocate new slot
         const index: Node = @enumFromInt(self.nodes.items.len);
-        try self.nodes.append(undefined);
+        try self.nodes.append(gpa, undefined);
         return index;
     }
 

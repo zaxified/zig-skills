@@ -8,7 +8,7 @@ Wall-clock timestamps, monotonic timers, high-precision timing, and epoch/calend
 
 Two 0.16 replacements exist, depending on whether you have an `Io` instance:
 
-- **With an `Io` instance:** use `std.Io.Clock` (`Clock.now(io)`, `Clock.Timestamp`, `Clock.Duration`) — see below. This is the idiomatic 0.16 way and is portable.
+- **With an `Io` instance:** use `std.Io.Clock` (`clock.now(io)`, e.g. `Io.Clock.real.now(io)`, `Clock.Timestamp`, `Clock.Duration`) — see below. This is the idiomatic 0.16 way and is portable.
 - **Without an `Io` instance** (e.g. deep library code): fall back to `std.c.clock_gettime` directly:
 
 ```zig
@@ -55,7 +55,7 @@ fn threadSleep(ns: u64) void {
 
 | Category | With `Io` (0.16) | Without `Io` (fallback) |
 |----------|-------------------|--------------------------|
-| Wall-clock timestamp | `Io.Clock.now(io, .real)` → `Io.Timestamp` | `std.c.clock_gettime(.REALTIME, &ts)` |
+| Wall-clock timestamp | `Io.Clock.real.now(io)` → `Io.Timestamp` | `std.c.clock_gettime(.REALTIME, &ts)` |
 | Monotonic / elapsed time | `Io.Clock.Timestamp.now(io, .awake)` + `.untilNow(io)` | n/a — needs some clock source |
 | Sleep | `io.sleep(duration, clock)` | `std.c.nanosleep` |
 | Epoch / calendar | `std.time.epoch.*` (unchanged) | same |
@@ -65,7 +65,7 @@ fn threadSleep(ns: u64) void {
 
 ```
 Need wall-clock time (date/time)?
-├─ Have an Io? → Io.Clock.now(io, .real)
+├─ Have an Io? → Io.Clock.real.now(io)
 └─ No Io?      → std.c.clock_gettime(.REALTIME, &ts)
 
 Need elapsed time / benchmarking / monotonic guarantee?
@@ -394,7 +394,7 @@ fn windowsToUnix(windows_secs: i64) i64 {
 
 ## Notes
 
-- Wall-clock functions are gone from `std.time`; use `Io.Clock.now(io, .real)` (or `std.c.clock_gettime` with no `Io`) — see migration section above
+- Wall-clock functions are gone from `std.time`; use `Io.Clock.real.now(io)` (or `std.c.clock_gettime` with no `Io`) — see migration section above
 - `Io.Timestamp`/`Io.Duration` use signed `i96` nanoseconds internally
 - `Io.Clock.Timestamp.now()` does not fail — an unsupported clock just has zero `resolution()`, it does not error
 - `epoch.EpochSeconds` expects unsigned `u64` (use `@intCast` from a timestamp's `.toSeconds()`)

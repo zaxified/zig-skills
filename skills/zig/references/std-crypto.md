@@ -14,7 +14,7 @@ Comprehensive cryptographic primitives: hashing, encryption, signatures, key exc
 | **KEM** | `kem.ml_kem.*` (post-quantum) |
 | **Password** | `pwhash.argon2`, `pwhash.scrypt`, `pwhash.bcrypt`, `pwhash.pbkdf2` |
 | **KDF** | `kdf.hkdf.HkdfSha256`, `kdf.hkdf.HkdfSha512` |
-| **Random** | `random` (thread-local CSPRNG) |
+| **Random** | removed in 0.16 — `io.randomSecure(&buf)`; `std.Random.DefaultCsprng` seeded from it |
 | **Utilities** | `secureZero`, `timing_safe.*`, `codecs.*` |
 
 ## Choosing Algorithms
@@ -419,12 +419,8 @@ pbkdf2(HmacSha256, &key, password, salt, 100000);  // 100k iterations
 // WRONG (0.16) — removed
 std.crypto.random.bytes(&key);
 
-// CORRECT — macOS + Linux glibc 2.36+
-extern "c" fn arc4random_buf(buf: *anyopaque, nbytes: usize) void;
-arc4random_buf(&key, key.len);
-
-// CORRECT — Linux only (no glibc dependency)
-_ = std.os.linux.getrandom(buf.ptr, buf.len, 0);
+// CORRECT — through the Io (portable; returns an error instead of leaving bytes undefined)
+try io.randomSecure(&key);
 ```
 
 Thread-local cryptographically secure PRNG:
@@ -575,10 +571,7 @@ counter += 1;
 // Option 2: Random (safe with XChaCha's 24-byte nonce)
 const XChaCha = std.crypto.aead.chacha_poly.XChaCha20Poly1305;
 var nonce: [XChaCha.nonce_length]u8 = undefined;
-// 0.16: std.crypto.random removed — read system entropy
-extern "c" fn arc4random_buf(buf: *anyopaque, nbytes: usize) void;  // macOS + Linux glibc 2.36+
-arc4random_buf(&nonce, nonce.len);
-// Linux-only alternative: _ = std.os.linux.getrandom(&nonce, nonce.len, 0);
+try io.randomSecure(&nonce); // 0.16: std.crypto.random removed
 ```
 
 ### Secure Password Storage
