@@ -2,9 +2,9 @@
 
 Coverage, dead code, duplication, linting and fuzzing. Zig ships none of these,
 and the usual third-party answers each have a trap that silently produces a
-green result. The measurements below were made against Zig `0.17.0-dev.1158` on
-macOS (aarch64) and cross-checked on Linux targets; the std APIs shown (the
-fuzzer in particular) exist in the released 0.16.0 as written.
+green result. The measurements below come from upstream and were made against Zig
+`0.17.0-dev.1158` on macOS (aarch64), not re-run here; the std APIs shown were
+checked against the released 0.17.0 (the fuzzer is unchanged since 0.16).
 
 ## Quick Reference
 
@@ -189,6 +189,9 @@ error. Use `//`.
 zig build test --fuzz=200000   # bounded, prints a report
 zig build test --fuzz          # unbounded + web UI showing covered lines
 ```
+
+Do not take a verdict from its exit status: `--fuzz` exits 0 even when it found a crash and
+does not report a hang — see [gotchas](zig-gotchas.md), "Testing and fuzzing".
 
 A plain `zig build test` runs the fuzz test once with a trivial input, so it
 costs nothing in the normal suite.

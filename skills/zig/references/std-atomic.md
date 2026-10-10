@@ -123,7 +123,7 @@ const prev = flags.bitToggle(5, .seq_cst);  // Flip bit 5
 
 ## Atomic Ordering
 
-Memory orderings control synchronization guarantees. From `std.builtin.AtomicOrder`:
+Memory orderings control synchronization guarantees. From `std.lang.AtomicOrder` (`std.builtin` is a deprecated alias in 0.17):
 
 | Order | Guarantees | Use Case |
 |-------|------------|----------|

@@ -61,7 +61,7 @@ rules:
   - id: "PE3"
     path: "references/std-process.md"
     message: "/etc/passwd"
-    reason: "Notes that std.process.getUserInfo is broken in 0.16.0 and that a uid can be read from world-readable /etc/passwd instead."
+    reason: "Describes std.process.getUserInfo, which reads world-readable /etc/passwd to look up a uid (read-only, no credentials)."
   - id: "MP2"
     path: "references/builtins.md"
     message: "Fill memory"

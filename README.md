@@ -4,7 +4,7 @@
 [![Scanned by NVIDIA SkillSpector](https://img.shields.io/badge/scanned_by-NVIDIA_SkillSpector-76b900)](https://github.com/NVIDIA/SkillSpector) [![Audited releases](https://img.shields.io/badge/releases-audited-2ea44f)](audits/) [![Latest release](https://img.shields.io/github/v/tag/zaxified/zig-skills)](https://github.com/zaxified/zig-skills/tags)
 
 An agent skill for **Zig 0.17.0**: the current std and build-system APIs, migration notes
-from 0.14 to 0.16, and gotchas found in production code. Every release is audited so that
+from 0.14 to 0.17, and gotchas found in production code. Every release is audited so that
 nothing in it can turn against the agent, or the person, using it.
 
 Most model training data predates the 0.15 I/O rewrite, the 0.16 `std.Io` redesign and the

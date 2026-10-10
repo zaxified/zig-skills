@@ -1,5 +1,5 @@
 
-# std.Build - Zig Build System Reference (0.15.x → 0.16)
+# std.Build - Zig Build System Reference (0.17.0)
 
 The Zig build system models projects as directed acyclic graphs (DAG) of build steps. Build scripts are written in Zig itself (`build.zig`), providing full language features during configuration.
 
@@ -52,8 +52,8 @@ lib.linkSystemLibrary("foo");
 lib.addCSourceFile(.{ .file = b.path("shim.c"), .flags = &.{} });
 
 // CORRECT — use root_module
-lib.root_module.addIncludePath(.{ .cwd_relative = path });
-lib.root_module.addLibraryPath(.{ .cwd_relative = path });
+lib.root_module.addIncludePath(b.graph.cwdRelativePath(path)); // 0.17: .cwd_relative is deprecated
+lib.root_module.addLibraryPath(b.graph.cwdRelativePath(path));
 lib.root_module.linkSystemLibrary("foo", .{});  // note: now takes options struct
 lib.root_module.addCSourceFile(.{ .file = b.path("shim.c"), .flags = &.{} });
 ```
@@ -474,12 +474,14 @@ update_step.dependOn(&update_src.step);
 ### Declaring in build.zig.zon
 ```zig
 .{
-    .name = "myproject",
+    .name = .myproject,             // an enum literal, not a string
     .version = "1.0.0",
+    .fingerprint = 0x0123456789abcdef, // generated once: zig build prints the value to use
+    .minimum_zig_version = "0.17.0",
     .dependencies = .{
         .zlib = .{
-            .url = "https://github.com/user/zlib-zig/archive/v1.0.0.tar.gz",
-            .hash = "1220abc123...",
+            .url = "https://example.com/zlib-zig-1.0.0.tar.gz",
+            .hash = "<name>-<version>-<hash printed by zig fetch>",
         },
         .local_lib = .{
             .path = "../local-lib",
@@ -501,7 +503,7 @@ const zlib = b.dependency("zlib", .{
 exe.root_module.addImport("zlib", zlib.module("zlib"));
 
 // Get artifact from dependency
-exe.linkLibrary(zlib.artifact("z"));
+exe.root_module.linkLibrary(zlib.artifact("z"));
 
 // Get path from dependency
 const include_path = zlib.path("include");
@@ -516,13 +518,13 @@ Lazy dependencies are only fetched when actually used, avoiding unnecessary down
 .dependencies = .{
     // Mark platform-specific dependency as lazy
     .@"dawn-windows-x64" = .{
-        .url = "https://github.com/example/dawn/releases/download/v1.0/dawn-windows-x64.tar.gz",
-        .hash = "1220abc...",
+        .url = "https://example.com/dawn-v1.0-windows-x64.tar.gz",
+        .hash = "<name>-<version>-<hash>",
         .lazy = true,  // Only fetched when dependencyLazy() is called
     },
     .@"dawn-linux-x64" = .{
-        .url = "https://github.com/example/dawn/releases/download/v1.0/dawn-linux-x64.tar.gz",
-        .hash = "1220def...",
+        .url = "https://example.com/dawn-v1.0-linux-x64.tar.gz",
+        .hash = "<name>-<version>-<hash>",
         .lazy = true,
     },
 },
@@ -541,8 +543,8 @@ const dawn_dep = switch (target.result.os.tag) {
 
 if (dawn_dep) |dep| {
     // Dependency is available, use normally
-    exe.addLibraryPath(dep.path("lib"));
-    exe.linkSystemLibrary("dawn");
+    exe.root_module.addLibraryPath(dep.path("lib"));
+    exe.root_module.linkSystemLibrary("dawn", .{});
 }
 ```
 
@@ -749,7 +751,7 @@ const config_h = b.addConfigHeader(.{
     .VERSION_STRING = "1.0.0",
 });
 
-exe.addConfigHeader(config_h);
+exe.root_module.addConfigHeader(config_h);
 ```
 
 ### Code Generation with Zig Tool
@@ -774,61 +776,57 @@ exe.root_module.addAnonymousImport("schema", .{
 ## C/C++ Integration
 
 ### Adding C Sources
+Since 0.16 these are `Module` methods (`exe.root_module.…`); the `Compile` step no longer has
+them.
 ```zig
-exe.addCSourceFiles(.{
+exe.root_module.addCSourceFiles(.{
     .root = b.path("src/c"),
     .files = &.{ "foo.c", "bar.c" },
     .flags = &.{ "-Wall", "-O2" },
 });
 
-exe.addCSourceFile(.{
+exe.root_module.addCSourceFile(.{
     .file = b.path("src/main.c"),
     .flags = &.{"-std=c11"},
 });
 ```
 
-**Note (0.16):** These methods moved to `root_module`. Use `exe.root_module.addCSourceFiles(...)`, `exe.root_module.addIncludePath(...)`, `exe.root_module.linkSystemLibrary("lib", .{})` instead.
-
 ### Include Paths and Macros
 ```zig
-exe.addIncludePath(b.path("include"));
-exe.addSystemIncludePath(b.path("deps/include"));
+exe.root_module.addIncludePath(b.path("include"));
+exe.root_module.addSystemIncludePath(b.path("deps/include"));
 exe.root_module.addCMacro("DEBUG", "1");
 exe.root_module.addCMacro("VERSION", "\"1.0.0\"");
 ```
 
-```zig
-// 0.16: These methods moved to root_module
-exe.root_module.addIncludePath(b.path("include"));
-exe.root_module.addSystemIncludePath(b.path("deps/include"));
-```
-
 ### Linking Libraries
 ```zig
-// System library
-exe.linkSystemLibrary("pthread");
-exe.linkSystemLibrary("ssl");
-
-// 0.16: linkSystemLibrary moved to root_module and requires options struct
+// System library (options struct required)
 exe.root_module.linkSystemLibrary("pthread", .{});
+exe.root_module.linkSystemLibrary("ssl", .{});
 
 // Static library file
-exe.addObjectFile(b.path("lib/libfoo.a"));
+exe.root_module.addObjectFile(b.path("lib/libfoo.a"));
 
 // Library search path
-exe.addLibraryPath(b.path("lib"));
-exe.addRPath(b.path("lib"));
+exe.root_module.addLibraryPath(b.path("lib"));
+exe.root_module.addRPath(b.path("lib"));
 
-// Link libc
-exe.linkLibC();
-exe.linkLibCpp();
+// Link libc / libc++: module options (no linkLibC() / linkLibCpp() any more)
+const mod = b.createModule(.{
+    .root_source_file = b.path("src/main.zig"),
+    .target = target,
+    .optimize = optimize,
+    .link_libc = true,
+    .link_libcpp = true,
+});
 ```
 
 ### pkg-config Integration
 ```zig
 // Use pkg-config to find library
-exe.linkSystemLibrary("openssl");
-exe.linkSystemLibrary("libcurl");
+exe.root_module.linkSystemLibrary("openssl", .{});
+exe.root_module.linkSystemLibrary("libcurl", .{});
 ```
 
 ### Best Practices: Prefer Zig APIs Over Clang Flags
@@ -849,7 +847,7 @@ const mod = b.createModule(.{
 });
 
 // AVOID: Raw Clang flags (use only when no Zig API exists)
-exe.addCSourceFiles(.{
+exe.root_module.addCSourceFiles(.{
     .files = &.{"foo.c"},
     .flags = &.{"-DDEBUG"},  // Use addCMacro instead when possible
 });
@@ -877,7 +875,7 @@ const generated = step.getOutput();
 const dep_file = dep.path("include/header.h");
 
 // CWD-relative (avoid when possible)
-const cwd_path: std.Build.LazyPath = .{ .cwd_relative = "/absolute/path" };
+const cwd_path: std.Build.LazyPath = b.graph.cwdRelativePath("/absolute/path"); // 0.17
 ```
 
 ### Using LazyPath
@@ -886,7 +884,7 @@ const cwd_path: std.Build.LazyPath = .{ .cwd_relative = "/absolute/path" };
 exe.root_module.root_source_file = b.path("src/main.zig");
 
 // As include path
-exe.addIncludePath(dep.path("include"));
+exe.root_module.addIncludePath(dep.path("include"));
 
 // Install
 b.installFile(generated_file, "share/output.txt");
@@ -896,20 +894,20 @@ b.installFile(generated_file, "share/output.txt");
 
 LazyPath is central to how data flows between build steps. Understanding its variants and methods is key to advanced build scripts.
 
-### The Four Variants
+### The Variants (0.17)
 ```zig
 const LazyPath = union(enum) {
-    // Path relative to build root (most common)
-    src_path: struct { root: ?*Build, sub_path: []const u8 },
-
-    // Output from a build step (e.g., compiled binary, generated file)
-    generated: struct { file: *GeneratedFile, sub_path: ?[]const u8 },
-
-    // Absolute or CWD-relative path (use sparingly)
+    // Path relative to a package root (b.path(...); most common)
+    src_path: struct { owner: *std.Build, sub_path: []const u8 },
+    // Output from a build step (compiled binary, generated file)
+    generated: struct { index: Configuration.GeneratedFileIndex, up: usize = 0, sub_path: []const u8 = "" },
+    // Deprecated: absolute or cwd-relative path; use b.graph.cwdRelativePath(...)
     cwd_relative: []const u8,
-
     // Path inside a dependency package
-    dependency: struct { dep: *Dependency, sub_path: []const u8 },
+    dependency: struct { dependency: *Dependency, sub_path: []const u8 },
+    // Relative to a well-known base: cwd, local cache, Zig executable, Zig lib dir
+    // (LazyPath.cache_root, LazyPath.zig_lib, ...)
+    relative: struct { base: Configuration.LazyPath.Relative.Base, sub_path: []const u8 = "" },
 };
 ```
 
@@ -925,8 +923,8 @@ const generated = run_step.addOutputFileArg2("output.txt", .{});
 // From dependency (returns dependency variant)
 const dep_header = zlib.path("include/zlib.h");
 
-// Absolute path (returns cwd_relative variant - avoid when possible)
-const abs: LazyPath = .{ .cwd_relative = "/usr/include" };
+// Absolute or cwd-relative path (avoid when possible)
+const abs: LazyPath = b.graph.cwdRelativePath("/usr/include");
 ```
 
 ### Establishing Data Dependencies
@@ -952,11 +950,11 @@ const base = b.path("src/modules/parser");
 // Navigate to parent directory
 const parent = base.dirname();  // "src/modules"
 
-// Concatenate subpath
-const file = base.join("lexer.zig");  // "src/modules/parser/lexer.zig"
+// Concatenate subpath (allocates from an arena; returns an error union)
+const file = try base.join(b.allocator, "lexer.zig");  // "src/modules/parser/lexer.zig"
 
 // Chain operations
-const sibling = base.dirname().join("utils/helpers.zig");  // "src/modules/utils/helpers.zig"
+const sibling = try base.dirname().join(b.allocator, "utils/helpers.zig");  // "src/modules/utils/helpers.zig"
 ```
 
 ## Build Allocation
@@ -995,21 +993,24 @@ ZON (Zig Object Notation) is used for package manifests.
 ### Full Example
 ```zig
 .{
-    // Package name (required)
-    .name = "my_project",
+    // Package name (required): an enum literal
+    .name = .my_project,
 
     // Semantic version (required)
     .version = "1.2.3",
 
+    // Package identity (required): generated once, zig build prints the value to use
+    .fingerprint = 0x0123456789abcdef,
+
     // Minimum Zig version (optional)
-    .minimum_zig_version = "0.15.0",
+    .minimum_zig_version = "0.17.0",
 
     // Dependencies (optional)
     .dependencies = .{
         // URL dependency with hash
         .@"zig-network" = .{
-            .url = "https://github.com/user/zig-network/archive/v1.0.0.tar.gz",
-            .hash = "12205f17c...",
+            .url = "https://example.com/zig-network-1.0.0.tar.gz",
+            .hash = "<name>-<version>-<hash printed by zig fetch>",
         },
 
         // Local path dependency
@@ -1020,7 +1021,7 @@ ZON (Zig Object Notation) is used for package manifests.
         // Lazy dependency (only fetched if used)
         .optional_dep = .{
             .url = "https://example.com/dep.tar.gz",
-            .hash = "1220abc...",
+            .hash = "<name>-<version>-<hash>",
             .lazy = true,
         },
     },
@@ -1042,7 +1043,7 @@ ZON (Zig Object Notation) is used for package manifests.
 zig build
 
 # Or fetch and display hash
-zig fetch https://github.com/user/repo/archive/v1.0.0.tar.gz
+zig fetch https://example.com/repo-1.0.0.tar.gz
 ```
 
 ## CLI Reference
@@ -1166,7 +1167,7 @@ for (examples) |name| {
 const fmt_step = b.step("fmt", "Check formatting");
 
 const fmt = b.addFmt(.{
-    .paths = &.{ "src/", "build.zig" },
+    .paths = b.pathList(&.{ "src", "build.zig" }), // 0.17: a list of LazyPath
     .check = true,
 });
 
@@ -1174,13 +1175,6 @@ fmt_step.dependOn(&fmt.step);
 ```
 
 ### Clean Step
-```zig
-const clean_step = b.step("clean", "Clean build artifacts");
-
-clean_step.dependOn(&b.addRemoveDirTree(b.path("zig-out")).step);
-
-// Note: zig-cache deletion may fail on Windows while build is running
-if (@import("builtin").os.tag != .windows) {
-    clean_step.dependOn(&b.addRemoveDirTree(b.path(".zig-cache")).step);
-}
-```
+There is no build step that deletes directories. To start clean, delete `zig-out/` yourself;
+`.zig-cache/` is safe to delete only when no `zig build` is running. Do not script deletion of
+the cache from `build.zig`.

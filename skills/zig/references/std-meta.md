@@ -325,7 +325,7 @@ const S = struct {
 };
 
 const decls = std.meta.declarations(S);
-// decls[0].name == "method" or "value"
+// decls[0] == "method" or "value" (0.17: plain names, no .name)
 ```
 
 ## Error Handling

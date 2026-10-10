@@ -158,9 +158,9 @@ std.debug.print("Deallocations: {}\n", .{failing.deallocations});
 
 ```zig
 fn myFunction(allocator: std.mem.Allocator, size: usize) !void {
-    var foo = try allocator.alloc(u8, size);
+    const foo = try allocator.alloc(u8, size);
     defer allocator.free(foo);
-    var bar = try allocator.alloc(u8, size);
+    const bar = try allocator.alloc(u8, size);
     defer allocator.free(bar);
     // ... use foo and bar
 }
@@ -232,14 +232,15 @@ comptime {
 // 0.16: std.testing.refAllDeclsRecursive is gone — only the non-recursive refAllDecls remains.
 // Write your own recursion if you need to reach into nested container types:
 fn refAllDeclsRecursive(comptime T: type) void {
-    inline for (comptime std.meta.declarations(T)) |decl| {
-        if (@TypeOf(@field(T, decl.name)) == type) {
-            switch (@typeInfo(@field(T, decl.name))) {
-                .@"struct", .@"enum", .@"union", .@"opaque" => refAllDeclsRecursive(@field(T, decl.name)),
+    // 0.17: std.meta.declarations returns plain names
+    inline for (comptime std.meta.declarations(T)) |name| {
+        if (@TypeOf(@field(T, name)) == type) {
+            switch (@typeInfo(@field(T, name))) {
+                .@"struct", .@"enum", .@"union", .@"opaque" => refAllDeclsRecursive(@field(T, name)),
                 else => {},
             }
         }
-        _ = &@field(T, decl.name);
+        _ = &@field(T, name);
     }
 }
 
@@ -392,7 +393,6 @@ test "arena for test allocations" {
 ```bash
 zig build test                    # Run all tests
 zig test src/lib.zig              # Test single file
-zig test --test-filter "name"     # Filter by name substring
-zig test -fsummary                # Show test summary
-zig test --verbose                # Show debug output
+zig test src/lib.zig --test-filter "name"  # Filter by name substring
+zig build test --summary all      # Show every step and test count
 ```

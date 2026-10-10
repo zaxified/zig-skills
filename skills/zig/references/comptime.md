@@ -166,7 +166,7 @@ fn sumComptime(comptime values: []const i32) i32 {
 }
 ```
 
-**Verified in stdlib:** `std/Build.zig:1953`
+**Verified in stdlib:** `std/Build.zig`
 
 ### inline for
 
@@ -196,7 +196,7 @@ fn eqlAny(comptime T: type, a: T, b: T) bool {
 }
 ```
 
-**Verified in stdlib:** `std/meta.zig:27`, `compiler_rt/fmax.zig:63`
+**Verified in stdlib:** `std/meta.zig`, `compiler_rt/fmax.zig`
 
 ### Decision Table
 
@@ -230,15 +230,18 @@ fn process(comptime T: type, value: T) T {
 
 ```zig
 const builtin = @import("builtin");
-const native_endian = builtin.target.cpu.arch.endian();
 
+// Branch on the target at comptime; only the taken branch is compiled.
+const page_size_hint = if (builtin.target.os.tag == .macos and builtin.target.cpu.arch == .aarch64)
+    16 * 1024
+else
+    4 * 1024;
+
+// Reading a big-endian integer: use std.mem.readInt. A hand-rolled `@bitCast` of the byte
+// array plus a byte swap on little-endian hosts is wrong on big-endian targets in 0.17,
+// where an array `@bitCast` is defined as little-endian on every target.
 pub fn readIntBig(comptime T: type, bytes: []const u8) T {
-    const value: T = @bitCast(bytes[0..@sizeOf(T)].*);
-    if (comptime native_endian == .big) {
-        return value;
-    } else {
-        return @byteSwap(value);
-    }
+    return std.mem.readInt(T, bytes[0..@sizeOf(T)], .big);
 }
 ```
 
@@ -263,7 +266,7 @@ pub fn example() void {
 }
 ```
 
-**Verified in stdlib:** `std/math.zig:708`, `std/log.zig:122`
+**Verified in stdlib:** `std/math.zig`, `std/log.zig`
 
 ---
 
@@ -346,7 +349,7 @@ pub fn toSubset(comptime Sub: type, full: anytype) ?Sub {
 }
 ```
 
-**Verified in stdlib:** `std/meta.zig`, `std/json/static.zig:299-302`
+**Verified in stdlib:** `std/meta.zig`, `std/json/static.zig`
 
 ---
 

@@ -1108,10 +1108,9 @@ pub const Node = enum(u32) {
             return @fromBackingInt(@backingInt(r.start) + i);
         }
 
-        /// Iterate over all nodes in range.
-        pub fn slice(r: Range) []const Node {
-            // Note: requires nodes stored contiguously
-            return @ptrCast(@as([*]const u32, @ptrFromInt(@backingInt(r.start)))[0..r.len]);
+        /// The range as a slice of the backing storage (a node index is not an address).
+        pub fn slice(r: Range, nodes: []const Node.Data) []const Node.Data {
+            return nodes[@backingInt(r.start)..][0..r.len];
         }
     };
 };
@@ -1137,15 +1136,16 @@ pub const NodePool = struct {
     /// Head of freelist, or none if no free slots.
     free_head: OptionalNode = .none,
 
-    pub fn alloc(self: *NodePool) !Node {
+    pub fn alloc(self: *NodePool, gpa: std.mem.Allocator) !Node {
         if (self.free_head.unwrap()) |free| {
             // Reuse freed slot
             self.free_head = self.nodes.items[@backingInt(free)].next_free;
             return free;
         }
         // Allocate new slot
-        const index: Node = @fromBackingInt(self.nodes.items.len);
-        try self.nodes.append(undefined);
+        // @fromBackingInt takes exactly the backing type (u32), not the usize length
+        const index: Node = @fromBackingInt(@intCast(self.nodes.items.len));
+        try self.nodes.append(gpa, undefined);
         return index;
     }
 
@@ -1359,7 +1359,7 @@ pub fn internString(state: *State, gpa: Allocator, bytes: []const u8) !String {
     });
     if (gop.found_existing) return gop.key_ptr.*;
 
-    const new_off: String = @fromBackingInt(state.string_bytes.items.len);
+    const new_off: String = @fromBackingInt(@intCast(state.string_bytes.items.len));
     state.string_bytes.appendSliceAssumeCapacity(bytes);
     state.string_bytes.appendAssumeCapacity(0);
     gop.key_ptr.* = new_off;

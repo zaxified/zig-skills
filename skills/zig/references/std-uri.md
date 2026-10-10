@@ -60,6 +60,10 @@ const uri = std.Uri.parse(input) catch |err| switch (err) {
         std.debug.print("Port not a valid u16\n", .{});
         return err;
     },
+    error.InvalidHostName => {
+        std.debug.print("Host is not a valid host name\n", .{});
+        return err;
+    },
 };
 ```
 
@@ -77,9 +81,8 @@ const Uri = struct {
     path: Component = Component.empty,
     query: ?Component = null,
     fragment: ?Component = null,
-
-    pub const host_name_max = 255;
 };
+// No host_name_max on Uri: the host-name limit is std.Io.net.HostName.max_len (254).
 ```
 
 ### Component Union
@@ -266,7 +269,7 @@ var buf: [256]u8 = undefined;
 var writer: std.Io.Writer = .fixed(&buf);
 
 // Encode with custom character validation
-std.Uri.Component.percentEncode(&writer, "custom data", struct {
+try std.Uri.Component.percentEncode(&writer, "custom data", struct {
     fn isValid(c: u8) bool {
         return std.ascii.isAlphanumeric(c);
     }
@@ -469,6 +472,7 @@ pub const ParseError = error{
     UnexpectedCharacter,  // Invalid character in URI component
     InvalidFormat,        // Malformed URI structure
     InvalidPort,          // Port not a valid u16
+    InvalidHostName,      // 0.17: host is not a valid host name
 };
 ```
 
