@@ -6,6 +6,33 @@ wrong, slow, or leaks. They were found on 0.16.0; each entry says whether 0.17.0
 
 ## New in 0.17.0
 
+### The build configuration is cached on inputs it cannot see
+`zig build` caches what `build.zig` configured and skips the configurer when the key — `-D`
+and CLI options, target, the `build.zig` sources, declared dependencies — is unchanged. A
+`build.zig` that scans a directory (a module list), reads a file or reads an environment
+variable keeps building the old graph after that input changes. Measured on 0.17.0: a file
+added to a scanned directory and an env var changed from `one` to `two` were both ignored, with
+no warning; `--cache-poison=disallowed` did not catch it because the configurer never ran.
+
+```zig
+// Directory and file inputs: declare them.
+b.dependOnDirectoryContents(b.path("modules"));    // entries added/removed/renamed
+b.dependOnFileContents(b.path("modules.zon"));
+// Environment: no declaration exists. Prefer a -D option; otherwise
+const level = b.graph.environ_map.get("MY_LEVEL");
+b.graph.poisonCache(); // configuration now reruns on every zig build
+```
+
+`b.findProgram` poisons the cache itself; `b.findProgramLazy` does not. One stale run can be
+forced with `zig build --cache-poison=poisoned`.
+
+### `zig build` lost flags scripts use
+`--global-cache-dir` (use `ZIG_GLOBAL_CACHE_DIR`), `--zig-lib-dir` (now `--zig-lib=`),
+`--build-runner`, `--debug-rt`, `--verbose-llvm-bc`. `b.cache_root` and
+`b.graph.global_cache_root` are gone, so configure code can no longer hand cache paths to a
+child `zig`. `--release=ReleaseSafe` fails (`--release=safe`), while `-Doptimize=ReleaseSafe`
+and `-OReleaseSafe` still work — keep the old spellings in scripts that must also run on 0.16.
+
 ### Silent behaviour changes
 - **`@bitCast` of arrays and vectors** now reinterprets logical bits, element 0 first: on a
   big-endian target an array-to-integer cast gives a different value than in 0.16. Little-endian
@@ -17,9 +44,10 @@ wrong, slow, or leaks. They were found on 0.16.0; each entry says whether 0.17.0
 - **`std.mem.containsAtLeastScalar(T, list, element, minimum)`** swapped its last two
   parameters. With `u8`/`usize`-compatible integers an old call still compiles and answers a
   different question.
-- **`std.testing.allocator` never reuses memory** (it is a `SafeAllocator`). Use-after-free
-  turns into a segfault or a panic much more often — good — but a test that allocates and frees
-  in a long loop grows its RSS with the total allocated, not the peak.
+- **`std.testing.allocator` never reuses memory** (a fresh `SafeAllocator` per test).
+  Use-after-free turns into a segfault or a panic much more often — good — but a test that
+  allocates and frees in a long loop grows its RSS with the total it allocated, not its peak.
+  Writes after free are checked in every mode; allocation stack traces exist only in Debug.
 
 ### Tooling
 - **ZLS does not work with 0.17.0** (the build runner it hooked into is gone). Editor
@@ -105,6 +133,21 @@ fn toI64(f: f64) ?i64 {
 Pair the guard with a test that an in-range float still converts, or the fix can silently
 disable the feature.
 
+### A failed `try` in a union literal has already written the tag
+
+Still true in 0.17.0. Result-location semantics write the destination's tag before the payload
+expression runs; when `try` returns, the destination is left with the new tag and an undefined
+payload.
+
+```zig
+// WRONG: on error, `o.*` is `.b` with garbage, not the old value
+o.* = .{ .b = try fail() };
+
+// CORRECT: evaluate first, then assign
+const v = try fail();
+o.* = .{ .b = v };
+```
+
 ## std.Io
 
 ### Cancellation is erased at the `Io.Reader` boundary
@@ -156,12 +199,19 @@ to that length, so the seed never reaches the code it was written for.
 - Add a test that decodes each seed through `Smith{ .in = entry }` and asserts it reaches
   the intended branch.
 
+`zig build test --fuzz` exits 0 even when it found a crash, shows no progress and does not
+report a hang (found on 0.16; the 0.17.0 release notes: "no changes were made to the
+fuzzer"). Never take a verdict from its exit code: drive the same harness from a deterministic
+seed loop in an ordinary test binary, with a timeout per input.
+
 The fuzzer explores raw bytes poorly; give harnesses a structured half built from
 `smith.value(T)` and friends. See [std.testing](std-testing.md).
 
 ### Two backends: self-hosted for the edit loop, LLVM for test runs
 
-Still true in 0.17.0. The timings below are from 0.16.0.
+Still true in 0.17.0. The timings below are from 0.16.0. New in 0.17: `-fincremental --watch`
+makes the self-hosted edit loop near-instant (measured 14 ms and 6 ms per edit of a small
+program), while an LLVM build gains nothing from it (a full 2–3 s rebuild per edit).
 
 A Debug build for x86_64 Linux uses the self-hosted backend; every Release mode, and Debug on
 most other targets, uses LLVM. `builtin.zig_backend` says which one built the code
@@ -249,7 +299,29 @@ const words: [*]volatile V = @ptrCast(@alignCast(buf.ptr));
 for (0..buf.len / 32) |k| words[k] = @splat(0);
 ```
 
+### `?Big = null` and `.{}` memset the whole value
+
+Still true in 0.17.0 (ReleaseFast, LLVM 22). Assigning `null` to an optional of a large struct,
+or initializing a struct with `.{}` whose large array field defaults to `undefined`, emits a
+`memset` over the whole value — 8 KiB for an 8 KiB buffer, on every call. On a hot path keep
+the large buffer out of the optional (a separate `has_value` flag) and initialize only the
+small fields.
+
 ## Security
+
+### `std.crypto.ff` and `select` are not constant-time in ReleaseFast
+
+Still true in 0.17.0 (measured with valgrind memcheck taint on ReleaseFast builds): the window
+selection in `ff.Modulus.pow` and the final-subtraction check in `montgomeryMul` branch on
+secret data, and LLVM 22 turns a hand-written `f64` mask select into a branch. Do not assume
+`std.crypto.ff` (RSA-style big-number arithmetic) is constant-time; verify the binary, not the
+source.
+
+### `Certificate.verify` does not check that the issuer is a CA
+
+Still true in 0.17.0: `std.crypto.Certificate.Parsed.verify` checks name chaining, validity
+dates and the signature, but not basicConstraints, so a leaf certificate can sign another
+certificate. Code that builds its own chain check must reject an issuer without `CA:TRUE`.
 
 ### `std.crypto` leaves key schedules on the stack
 

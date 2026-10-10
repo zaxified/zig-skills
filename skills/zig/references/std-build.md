@@ -3,6 +3,40 @@
 
 The Zig build system models projects as directed acyclic graphs (DAG) of build steps. Build scripts are written in Zig itself (`build.zig`), providing full language features during configuration.
 
+## Critical: Configuration Is Cached (0.17)
+
+`zig build` runs `build.zig` in a *configurer* process and caches the resulting graph; a
+*maker* process executes it. The configurer is skipped when the key is unchanged: CLI and
+`-D` options, the target, the `build.zig` sources, and inputs you declared. Anything else that
+configure logic reads is invisible to the key:
+
+```zig
+pub fn build(b: *std.Build) void {
+    // Scanning a directory or reading a file at configure time: declare it, or a new module
+    // never shows up until build.zig itself changes.
+    b.dependOnDirectoryContents(b.path("modules"));
+    b.dependOnFileContents(b.path("versions.zon"));
+
+    // Environment variables cannot be declared. Prefer an option:
+    const level = b.option(u8, "level", "Verbosity") orelse 1;
+    _ = level;
+    // ...or, if you must read the environment, give up configuration caching:
+    // _ = b.graph.environ_map.get("MY_VAR"); b.graph.poisonCache();
+}
+```
+
+- `b.findProgram` poisons the cache (configuration reruns every time); `b.findProgramLazy`
+  returns a `LazyPath` searched only when a step needs it and keeps the cache pure.
+- `zig build --cache-poison=disallowed` panics with a stack trace where configure logic
+  poisons the cache — but only when the configurer actually runs; it does not detect
+  undeclared reads on a cache hit.
+- `zig build --print-configuration` prints the cached graph as ZON.
+- Paths: `b.build_root` → `b.root` (a `Cache.Path`; `b.root.root_dir.handle` is the `Dir`).
+  `b.cache_root` and `b.graph.global_cache_root` are gone. The global cache directory is set
+  with `ZIG_GLOBAL_CACHE_DIR` (there is no `--global-cache-dir` for `zig build` any more).
+- The first `zig build` after installing Zig compiles the maker once (about 110 s on an 8-core
+  x86_64 Linux machine).
+
 ## Critical: Compile Methods Moved to Module (0.16)
 
 In Zig 0.16, several methods moved from `Build.Step.Compile` to `Build.Module`:

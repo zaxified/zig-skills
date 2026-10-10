@@ -114,9 +114,10 @@ of `decls`, `error_set.error_names`. `std.meta.fields` is a compile error; `fiel
 - **`@hasDecl` sees only `pub` declarations**, also from inside the same file.
 - **`std.mem.containsAtLeastScalar(T, list, element, minimum)`** — `element` and `minimum`
   swapped places; old calls with an integer element still compile.
-- **`std.testing.allocator` is a `SafeAllocator`**: it never reuses memory, reports leaks in
-  every optimize mode (a leaking test now fails in ReleaseFast too), and test RSS grows with
-  allocation volume.
+- **`std.testing.allocator` is a `SafeAllocator`**, fresh for every test: it never reuses
+  memory (a test's RSS grows with what that test allocates, not its peak), checks writes after
+  free in every mode, records allocation stack traces only in Debug, and a leak fails the test
+  in every mode, ReleaseFast included.
 
 ### Renamed std
 | 0.16 | 0.17.0 |
@@ -151,9 +152,25 @@ if (b.args) |args| run_cmd.addArgs(args);
 run_cmd.addPassthruArgs();   // forwards `zig build run -- a b c`
 ```
 - `zig build` runs `build.zig` in a separate *configurer* process; a cached *maker* executes the
-  graph. The first `zig build` after installing Zig compiles the maker (measured: about 115 s
-  on an 8-core x86_64 Linux machine; once per toolchain and global cache);
-  later runs skip `build.zig` entirely when the configuration is unchanged.
+  graph. The first `zig build` after installing Zig compiles the maker (measured: 108–115 s
+  on an 8-core x86_64 Linux machine; once per toolchain and global cache — cache
+  `ZIG_GLOBAL_CACHE_DIR` in CI). Later runs skip `build.zig` entirely when the configuration
+  key is unchanged (measured: 15 ms for `zig build --help`).
+- **The configuration is cached, and only declared inputs invalidate it.** The key is the
+  `-D`/CLI options, the target and the `build.zig` sources. A `build.zig` that reads a
+  directory, a file or an environment variable at configure time keeps the old result after
+  that input changes — measured: a new file in a scanned directory and a changed env var were
+  both ignored, silently, and `--cache-poison=disallowed` did not notice (the configurer never
+  ran). Declare files and directories with `b.dependOnFileContents` /
+  `dependOnDirectoryContents` (or `*Metadata`); there is no declaration for environment
+  variables — turn them into `-D` options, or call `b.graph.poisonCache()` after reading one
+  (configuration then reruns on every invocation). `zig build --cache-poison=poisoned` forces
+  one rerun.
+- `zig build` CLI: `--global-cache-dir` is gone (use the `ZIG_GLOBAL_CACHE_DIR` environment
+  variable), `--zig-lib-dir` → `--zig-lib=`, `--build-runner`, `--debug-rt` and
+  `--verbose-llvm-bc` are gone. New: `--print-configuration`, `--cache-poison`, `--listen=-`.
+  `b.cache_root` and `b.graph.global_cache_root` no longer exist (configure logic cannot see
+  cache paths).
 - `b.build_root` → `b.root` (a `Cache.Path`); `LazyPath.getDisplayName()` → `"{f}"`.
 - Run step args: `addOutputFileArg(name)` → `addOutputFileArg2(name, .{})`, and the same `*Arg2(…,
   .{ .prefix = … })` scheme for artifact, file, directory, output-directory and dep-file args.
@@ -169,9 +186,23 @@ run_cmd.addPassthruArgs();   // forwards `zig build run -- a b c`
 - Overriding the build runner is gone (`--build-runner`); IDEs use `zig build --listen=-`
   (Build Server Protocol). **ZLS does not work with 0.17.0** — expect no editor diagnostics.
 
+### Optimize modes and backends
+- **Both spellings work in 0.17, only the old ones in 0.16:** `-OReleaseSafe` / `-Osafe` for
+  `zig test`/`build-exe`, `-Doptimize=ReleaseSafe` / `-Doptimize=safe` for `zig build`. A
+  script shared by 0.16 and 0.17 toolchains keeps the old names. Exception: `--release=safe`
+  accepts only the new names. In code, compare against `.debug`/`.safe`/`.fast`/`.small`.
+- `builtin.mode` prints as `debug`, `safe`, … (`{t}`).
+- Debug on x86_64 Linux still uses the self-hosted backend; release modes use LLVM;
+  `.use_llvm = true` on a compile step, or `-fllvm`, forces LLVM in Debug (unchanged).
+- `-fformatted-panics` / `-fno-formatted-panics` are gone.
+
 ### Incremental compilation
-`zig build -fincremental --watch` works for most x86_64-linux projects in 0.17.0 (new ELF
-linker). Without `--watch` there is no incremental mode yet.
+`zig build -fincremental --watch` rebuilds on every save — but only the **self-hosted**
+backend compiles incrementally. Measured on a small project: self-hosted 479 ms first build,
+then 14 ms and 6 ms per edit; with `.use_llvm = true` every edit was a full 2–3 s rebuild.
+For the edit loop (and while ZLS does not work) run it with the self-hosted backend, e.g.
+`zig build -fincremental --watch -Dselfhosted=true` when the build exposes such an option;
+test with LLVM. There is no incremental mode without `--watch`.
 
 ## Critical: Removed Features (0.15.x)
 
