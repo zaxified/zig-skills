@@ -36,7 +36,7 @@ list.appendSliceAssumeCapacity(&[_]u32{1, 2, 3});
 // Access items
 const items = list.items;  // []T slice
 const first = list.items[0];
-const last = list.getLast();  // returns ?T
+const last = list.last();  // returns ?T
 const popped = list.pop();    // returns ?T, removes last
 
 // Insert at index

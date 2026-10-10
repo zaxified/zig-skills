@@ -186,9 +186,9 @@ for (events[0..n]) |ev| {
 const linux = std.os.linux;
 
 // Get auxiliary vector values (set by kernel at process start)
-const page_size = linux.getauxval(std.elf.AT_PAGESZ);
-const entry_point = linux.getauxval(std.elf.AT_ENTRY);
-const platform = linux.getauxval(std.elf.AT_PLATFORM);
+const page_size = linux.getauxval(std.elf.AT.PAGESZ);
+const entry_point = linux.getauxval(std.elf.AT.ENTRY);
+const platform = linux.getauxval(std.elf.AT.PLATFORM);
 ```
 
 ## Windows-Specific APIs

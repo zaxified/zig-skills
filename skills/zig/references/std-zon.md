@@ -1,6 +1,6 @@
 # std.zon - ZON Parsing and Serialization
 
-ZON ("Zig Object Notation") parsing and stringification in Zig 0.15.x. ZON's grammar is a subset of Zig's syntax.
+ZON ("Zig Object Notation") parsing and stringification in Zig 0.17.0. ZON's grammar is a subset of Zig's syntax.
 
 ## Table of Contents
 - [ZON Format Overview](#zon-format-overview)
@@ -45,11 +45,22 @@ ZON is a data format using Zig's literal syntax:
 
 ## Parsing ZON
 
-**`fromSlice` vs `fromSliceAlloc`:** `fromSlice` asserts *at compile time* that `T` contains no
-pointers (so the result never needs freeing) — passing a type with a `[]const u8` field, for
-example, is a compile-time `unreachable`, not a runtime error. `fromSliceAlloc` allows pointers
-and heap-allocates them; free the result with `std.zon.parse.free`. Reach for `fromSliceAlloc`
-whenever `T` has string/slice fields, which is the common case.
+**0.17: `std.zon.parse` was reworked.** Every `from*` function takes one options struct
+(`gpa`, `arena`, `source`, `diagnostics`, `ignore_unknown_fields`). The result and the
+diagnostics are allocated from `arena`; `gpa` is only scratch space. There is no `free` and no
+`Diagnostics.deinit`: free the arena. Names moved one step:
+
+| 0.16 | 0.17 |
+|---|---|
+| `fromSliceAlloc(T, gpa, src, &diag, .{})` | `fromSlice(T, .{ .gpa = gpa, .arena = arena, .source = src, .diagnostics = &diag })` |
+| `fromSlice(T, gpa, src, &diag, .{})` (no pointers in `T`) | `fromSliceNoAlloc(T, .{ ... })` |
+| `std.zon.parse.free(gpa, value)` | deinit the arena |
+| `diag.iterateErrors()` / `getLocation` / `fmtMessage` | `diag.errors` (each has `.msg`, `.loc`), `diag.log(path)`, `diag.fatal(path)`, `"{f}", .{diag.fmt(path)}` |
+| `.free_on_error` option | gone (the arena owns everything) |
+
+`fromSliceNoAlloc` asserts at compile time that `T` has no pointers, so its result may
+outlive the arena. New: `updateFromSlice(T, &value, options)` overwrites only the fields the
+ZON source names — layered config files (global, then per-project) in one call each.
 
 ### Parse into Struct (Runtime)
 
@@ -69,55 +80,67 @@ const zon_str: [:0]const u8 =
     \\}
 ;
 
-pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    var arena_state: std.heap.ArenaAllocator = .init(init.gpa);
+    defer arena_state.deinit(); // frees the result and the diagnostics
+    var diag: std.zon.parse.Diagnostics = undefined;
 
-    // `Config.name` is a slice (a pointer), so this needs `fromSliceAlloc`, not `fromSlice`:
-    // `fromSlice` asserts at compile time that T contains no pointers.
-    const config = try std.zon.parse.fromSliceAlloc(Config, allocator, zon_str, null, .{});
-    defer std.zon.parse.free(allocator, config);
+    const config = std.zon.parse.fromSlice(Config, .{
+        .gpa = init.gpa,
+        .arena = arena_state.allocator(),
+        .source = zon_str,
+        .diagnostics = &diag,
+    }) catch |err| switch (err) {
+        error.ParseZon => diag.fatal("config.zon"), // logs "config.zon:L:C: msg" and exits 1
+        error.OutOfMemory => |e| return e,
+    };
 
-    // config.name == "server"
-    // config.port == 3000
-    // config.debug == false (default)
+    std.debug.print("{s}:{d} debug={}\n", .{ config.name, config.port, config.debug });
 }
 ```
 
-### Parse with Diagnostics
+### Reporting Errors Without Exiting
 
 ```zig
-var diag: std.zon.parse.Diagnostics = .{};
-defer diag.deinit(allocator);
-
-const result = std.zon.parse.fromSliceAlloc(Config, allocator, zon_str, &diag, .{}) catch |err| {
-    // Print diagnostic errors
-    var errors = diag.iterateErrors();
-    while (errors.next()) |parse_err| {
-        const loc = parse_err.getLocation(&diag);
-        std.debug.print("{d}:{d}: {f}\n", .{
-            loc.line + 1,
-            loc.column + 1,
-            parse_err.fmtMessage(&diag),
-        });
-    }
-    return err;
+const result = std.zon.parse.fromSlice(Config, .{
+    .gpa = gpa,
+    .arena = arena,
+    .source = zon_str,
+    .diagnostics = &diag,
+}) catch |err| switch (err) {
+    error.ParseZon => {
+        diag.log("config.zon"); // std.log.err, every error with path:line:column
+        for (diag.errors) |e| std.debug.print("{d}:{d}: {s}\n", .{ e.loc.line + 1, e.loc.column + 1, e.msg });
+        return err;
+    },
+    error.OutOfMemory => |e| return e,
 };
-defer std.zon.parse.free(allocator, result);
 ```
 
 ### Parse Options
 
 ```zig
-const result = try std.zon.parse.fromSliceAlloc(T, allocator, zon_str, diag, .{
-    // Ignore unknown fields (default: false - errors on unknown)
-    .ignore_unknown_fields = true,
-
-    // Free partially parsed values on error (default: true)
-    // Disable if using arena allocation
-    .free_on_error = false,
+const result = try std.zon.parse.fromSlice(T, .{
+    .gpa = gpa,
+    .arena = arena,
+    .source = zon_str,
+    .diagnostics = &diag,
+    .ignore_unknown_fields = true, // default false: an unknown field is an error
 });
+```
+
+### Layered Configuration: `updateFromSlice`
+
+```zig
+var config: Config = .{ .name = "default" };   // fully initialized first
+try std.zon.parse.updateFromSlice(Config, &config, .{
+    .gpa = gpa, .arena = arena, .source = global_zon, .diagnostics = &diag,
+});
+try std.zon.parse.updateFromSlice(Config, &config, .{
+    .gpa = gpa, .arena = arena, .source = project_zon, .diagnostics = &diag,
+});
+// Fields absent from both files keep their defaults. On error `config` is valid but may be
+// partially updated.
 ```
 
 ### Compile-Time Parsing with @import
@@ -129,13 +152,6 @@ const build_zon = @import("build.zig.zon");
 // Access fields directly
 const name = build_zon.name;
 const version = build_zon.version;
-```
-
-### Free Parsed Values
-
-```zig
-const result = try std.zon.parse.fromSliceAlloc(T, allocator, zon_str, null, .{});
-defer std.zon.parse.free(allocator, result);
 ```
 
 ## Serializing to ZON
@@ -151,10 +167,8 @@ const Config = struct {
     enabled: bool,
 };
 
-pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
 
     const config = Config{
         .name = "server",
@@ -194,6 +208,9 @@ try std.zon.stringify.serialize(value, .{
 
     // Skip fields equal to their default value (default: true)
     .emit_default_optional_fields = true,  // false to omit defaults
+
+    // 0.17: escape non-ASCII characters as \u{...} (default: false, UTF-8 passes through)
+    .escape_non_ascii = false,
 }, &writer);
 ```
 
@@ -305,8 +322,8 @@ try s.int(42);
 // Float
 try s.float(3.14);
 
-// String
-try s.string("hello\nworld");  // "hello\nworld"
+// String (0.17: takes options)
+try s.string("hello\nworld", .{});  // "hello\nworld"
 
 // Multiline string
 try s.multilineString("line1\nline2", .{});
@@ -317,9 +334,10 @@ try s.multilineString("line1\nline2", .{});
 try s.ident("foo");  // .foo
 try s.ident("var");  // .@"var" (escaped keyword)
 
-// Unicode codepoint
-try s.codePoint('a');  // 'a'
-try s.codePoint('⚡'); // '\u{26a1}'
+// Unicode codepoint (0.17: takes options; non-ASCII passes through unless escaped)
+try s.codePoint('a', .{});                            // 'a'
+try s.codePoint('⚡', .{});                           // '⚡'
+try s.codePoint('⚡', .{ .escape_non_ascii = true }); // '\u{26a1}'
 ```
 
 ### Value Serialization with Options
@@ -401,7 +419,8 @@ const Config = struct {
     debug: bool = false,
 };
 
-fn loadConfig(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !Config {
+/// The returned strings live in `arena`.
+fn loadConfig(io: std.Io, gpa: std.mem.Allocator, arena: std.mem.Allocator, path: []const u8) !Config {
     const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch |err| switch (err) {
         error.FileNotFound => return Config{},
         else => return err,
@@ -411,17 +430,24 @@ fn loadConfig(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !Confi
     var buf: [4096]u8 = undefined;
     var file_reader = file.reader(io, &buf);
     const content = try file_reader.interface.allocRemainingAlignedSentinel(
-        allocator,
+        gpa,
         .limited(1024 * 1024),
         .of(u8),
         0,  // null terminator
     );
-    defer allocator.free(content);
+    defer gpa.free(content);
 
-    return std.zon.parse.fromSliceAlloc(Config, allocator, content, null, .{
+    var diag: std.zon.parse.Diagnostics = undefined;
+    return std.zon.parse.fromSlice(Config, .{
+        .gpa = gpa,
+        .arena = arena,
+        .source = content,
+        .diagnostics = &diag,
         .ignore_unknown_fields = true,
-        .free_on_error = true,
-    });
+    }) catch |err| {
+        if (err == error.ParseZon) diag.log(path);
+        return err;
+    };
 }
 ```
 
@@ -480,7 +506,8 @@ try std.zon.stringify.serialize(settings, .{
 ### Round-Trip ZON Data
 
 ```zig
-fn roundTrip(comptime T: type, allocator: std.mem.Allocator, value: T) !T {
+/// The result lives in `arena`.
+fn roundTrip(comptime T: type, allocator: std.mem.Allocator, arena: std.mem.Allocator, value: T) !T {
     // Serialize
     var aw: std.Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
@@ -492,6 +519,12 @@ fn roundTrip(comptime T: type, allocator: std.mem.Allocator, value: T) !T {
     const terminated: [:0]const u8 = zon_str[0 .. zon_str.len - 1 :0];
 
     // Parse back
-    return std.zon.parse.fromSliceAlloc(T, allocator, terminated, null, .{});
+    var diag: std.zon.parse.Diagnostics = undefined;
+    return std.zon.parse.fromSlice(T, .{
+        .gpa = allocator,
+        .arena = arena,
+        .source = terminated,
+        .diagnostics = &diag,
+    });
 }
 ```

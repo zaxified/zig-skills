@@ -562,8 +562,8 @@ switch (result) {
 const result = std.zig.number_literal.parseNumberLiteral("0xFF_AB");
 switch (result) {
     .int => |value| std.debug.print("Integer: {d}\n", .{value}),
-    .big_int => |base| std.debug.print("Big int, base {d}\n", .{@intFromEnum(base)}),
-    .float => |base| std.debug.print("Float, base {d}\n", .{@intFromEnum(base)}),
+    .big_int => |base| std.debug.print("Big int, base {d}\n", .{@backingInt(base)}),
+    .float => |base| std.debug.print("Float, base {d}\n", .{@backingInt(base)}),
     .failure => |err| std.debug.print("Invalid number\n", .{}),
 }
 ```
@@ -708,10 +708,10 @@ fn checkForTodos(tree: *const std.zig.Ast) void {
         if (tag == .doc_comment) {
             const start = starts[i];
             const slice = tree.source[start..];
-            const end = std.mem.indexOfScalar(u8, slice, '\n') orelse slice.len;
+            const end = std.mem.findScalar(u8, slice, '\n') orelse slice.len;
             const comment = slice[0..end];
 
-            if (std.mem.indexOf(u8, comment, "TODO")) |_| {
+            if (std.mem.find(u8, comment, "TODO")) |_| {
                 const loc = tree.tokenLocation(0, @intCast(i));
                 std.debug.print("TODO found at line {d}\n", .{loc.line + 1});
             }

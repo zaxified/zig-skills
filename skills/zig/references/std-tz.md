@@ -19,7 +19,7 @@ const std = @import("std");
 pub fn main(process_init: std.process.Init) !void {
     const io = process_init.io;
 
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    var gpa: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

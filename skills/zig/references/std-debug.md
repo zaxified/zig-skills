@@ -395,7 +395,7 @@ std.debug.print("{s}:{d}: {s}\n", .{
 
 ```zig
 // Whether runtime safety checks are enabled
-std.debug.runtime_safety  // true in Debug/ReleaseSafe
+@import("builtin").mode.runtimeSafety()  // true in debug/safe (was std.debug.runtime_safety)
 
 // Whether platform can produce stack traces
 std.debug.sys_can_stack_trace  // false on WASM, MIPS, etc.

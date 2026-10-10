@@ -109,7 +109,7 @@ var arena_copy = try set.cloneWithAllocator(arena.allocator());
 const std = @import("std");
 
 pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    var gpa: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
 
@@ -145,7 +145,7 @@ pub fn main() !void {
 const std = @import("std");
 
 pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    var gpa: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
     defer _ = gpa.deinit();
 
     var words = std.BufSet.init(gpa.allocator());

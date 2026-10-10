@@ -903,10 +903,6 @@ std.c.projid_t
 std.c.team_id
 std.c.thread_id
 std.c.area_id
-std.c.area_info
-std.c._get_next_area_info()
-std.c._get_next_image_info()
-std.c.find_directory()
 std.c.get_system_info()
 ```
 
@@ -915,8 +911,6 @@ std.c.get_system_info()
 std.c.PERF_EVENT
 std.c.profiling_enable()
 std.c.profiling_disable()
-std.c.futex_wait()
-std.c.futex_wake()
 std.c.anon_create()
 ```
 
@@ -983,7 +977,7 @@ fn checkError(result: c.c_int) !void {
     if (result < 0) {
         const errno_val = c._errno().*;
         // Convert to std.posix error
-        return std.posix.unexpectedErrno(@enumFromInt(errno_val));
+        return std.posix.unexpectedErrno(@fromBackingInt(@intCast(errno_val)));
     }
 }
 ```

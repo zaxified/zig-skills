@@ -6,7 +6,7 @@ New buffered I/O API introduced in Zig 0.15.x ("Writergate"). Non-generic, buffe
 
 In Zig 0.16, the `std.io` namespace (lowercase) is completely removed. `std.Io` (capital) is the async IO module with different semantics.
 
-### fixedBufferStream → std.fmt.bufPrint
+### fixedBufferStream → std.mem.print
 ```zig
 // WRONG (0.16) — std.io.fixedBufferStream removed
 var buf: [512]u8 = undefined;
@@ -14,9 +14,9 @@ var stream = std.io.fixedBufferStream(&buf);
 try std.fmt.format(stream.writer(), "{d}", .{value});
 const result = stream.getWritten();
 
-// CORRECT — use std.fmt.bufPrint
+// CORRECT — use std.mem.print (std.fmt.bufPrint before 0.17)
 var buf: [512]u8 = undefined;
-const result = try std.fmt.bufPrint(&buf, "{d}", .{value});
+const result = try std.mem.print(&buf, "{d}", .{value});
 ```
 
 ### Vtable Writer Parameter
@@ -436,7 +436,7 @@ const ns: i128 = std.Io.Timestamp.now(io, .awake).nanoseconds - t0.nanoseconds;
 ### Allocator
 
 ```zig
-var gpa: std.heap.DebugAllocator(.{}) = .init; // was GeneralPurposeAllocator(.{}){}
+var gpa: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{}); // was DebugAllocator(.{}) before 0.17
 defer _ = gpa.deinit();
 ```
 

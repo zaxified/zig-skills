@@ -115,8 +115,15 @@ LANGUAGE = [
     (re.compile(r"\bvoid\{\}"), "`void{}` was removed; use `{}`"),
     (re.compile(r"(?<![\w.])i0\b"), "`i0` was removed; use `u0`"),
     (re.compile(r"@cImport\b"), "@cImport was removed; use the translate-c package"),
+    (re.compile(r"@Type\("), "@Type was removed (already in 0.16); use @Int, @Struct, @Union, @Enum, @Pointer, @Fn, @Tuple"),
     (re.compile(r"@(intFromEnum|enumFromInt)\b"), "deprecated; use @backingInt / @fromBackingInt"),
-    (re.compile(r'@"(?:struct|union)"\.fields\b'), "struct/union type info is struct-of-arrays: field_names, field_types"),
+    # std.lang.Type is struct-of-arrays in 0.17 for struct, union, enum, fn, opaque and
+    # error sets, and Pointer/Fn flags moved into `attrs` (diffed field by field, 0.16 vs 0.17).
+    (re.compile(r'@"(?:struct|union|enum)"\.fields\b'), "type info is struct-of-arrays: field_names, field_types/field_values, field_attrs"),
+    (re.compile(r'(?:@"(?:struct|union|enum|opaque)"|\binfo)\.decls\b'), "type info has decl_names instead of decls"),
+    (re.compile(r"\.(?:is_exhaustive|is_var_args|calling_convention|is_allowzero|is_volatile|address_space)\b"),
+     "type info: enum .mode, fn .attrs.varargs / .attrs.@\"callconv\", pointer .attrs.@\"allowzero\"/@\"volatile\"/@\"addrspace\""),
+    (re.compile(r'@"fn"\.params\b|\.pointer\.(?:is_const|alignment)\b'), "type info: fn param_types/param_attrs, pointer .attrs.@\"const\"/@\"align\""),
     (re.compile(r"\.linkage\s*=\s*\.(?:internal|link_once)\b"), "GlobalLinkage .internal and .link_once were removed"),
     (re.compile(r"\bb\.(?:args|build_root)\b"), "b.args is gone (run.addPassthruArgs()); b.build_root is b.root"),
 ]

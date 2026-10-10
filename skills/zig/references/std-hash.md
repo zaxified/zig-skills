@@ -211,7 +211,7 @@ const checksum = crc.Crc32Iscsi.hash("data");
 
 ```zig
 const std = @import("std");
-const Crc = std.hash.crc.Crc;
+const Crc = std.hash.crc.Generic;  // Generic(W, algorithm)
 
 // Define custom CRC
 const MyCrc = Crc(u16, .{
@@ -403,7 +403,7 @@ Cryptographically strong for hash table protection:
 const std = @import("std");
 
 // Requires 128-bit key
-const key: [16]u8 = .{0} ** 16;
+const key: [16]u8 = @splat(0);
 
 const h64 = std.hash.SipHash64(2, 4).hash(&key, "data");
 const h128 = std.hash.SipHash128(2, 4).hash(&key, "data");

@@ -17,7 +17,7 @@ HTTP client and server implementation with TLS, connection pooling, compression,
 const std = @import("std");
 
 pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    var gpa: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -32,7 +32,7 @@ pub fn main() !void {
     const result = try client.fetch(.{
         .location = .{ .url = "https://example.com/api" },
     });
-    std.debug.print("Status: {d}\n", .{@intFromEnum(result.status)});
+    std.debug.print("Status: {d}\n", .{@backingInt(result.status)});
 }
 ```
 
@@ -52,7 +52,7 @@ const result = try client.fetch(.{
 });
 
 const body = body_writer.buffered();
-std.debug.print("Response ({d}): {s}\n", .{@intFromEnum(result.status), body});
+std.debug.print("Response ({d}): {s}\n", .{@backingInt(result.status), body});
 ```
 
 ### Fetch with POST Body
@@ -98,7 +98,7 @@ var redirect_buf: [8192]u8 = undefined;
 var response = try req.receiveHead(&redirect_buf);
 
 std.debug.print("Status: {d} {s}\n", .{
-    @intFromEnum(response.head.status),
+    @backingInt(response.head.status),
     response.head.reason,
 });
 

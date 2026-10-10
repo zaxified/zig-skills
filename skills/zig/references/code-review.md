@@ -157,12 +157,12 @@ asm volatile ("syscall"
 |-----|-----|--------|
 | `root_source_file` | `root_module = b.createModule(...)` | std.Build |
 | `exe.addModule(...)` | `exe.root_module.addImport(...)` | std.Build |
-| `GeneralPurposeAllocator` | `DebugAllocator` | std.heap (alias still works) |
+| `GeneralPurposeAllocator` / `DebugAllocator` | `std.heap.SafeAllocator` | std.heap (0.17: renamed; `init(backing, .{})`; `deinit()` returns the leak count) |
 | `std.mem.page_size` | `std.heap.pageSize()` | Runtime query |
 | `BufferedWriter` | Buffer provided to `.writer(&buf)` | std.io |
 | `CountingWriter` | `std.Io.Writer.Discarding` | std.io |
 | `GenericWriter/Reader` | `std.Io.Writer/Reader` | std.io (deprecated) |
-| `std.ArrayList` | `std.array_list.Managed` | Eventually removed |
+| `std.array_list.Managed` | `std.ArrayList` (unmanaged; pass the allocator per call) | Managed variant deprecated |
 | `std.fifo.LinearFifo` | Use `std.Io.Reader`/`Writer` patterns | Removed; ring-buffer I/O approach |
 | `std.RingBuffer` | Use `std.Io.Reader`/`Writer` patterns | Removed; migrated to Io interfaces |
 | `std.net.*` | `std.Io.net.*` (requires Io instance) | std.net (0.16) |
@@ -174,7 +174,7 @@ asm volatile ("syscall"
 | `std.posix.close/write/connect/socket` | `std.c.close` / C externs | std.posix (0.16) |
 | `lib.addIncludePath(...)` | `lib.root_module.addIncludePath(...)` | std.Build (0.16) |
 | `lib.linkSystemLibrary("x")` | `lib.root_module.linkSystemLibrary("x", .{})` | std.Build (0.16) |
-| `std.io.fixedBufferStream` | `std.fmt.bufPrint` | std.io (0.16) |
+| `std.io.fixedBufferStream` | `std.mem.print` | std.io (0.16) |
 
 **Examples:**
 
@@ -256,7 +256,7 @@ std.debug.print("{f}", .{myFormattableType});
 | Wrong | Right | Reason |
 |-------|-------|--------|
 | `var list: ArrayList(T) = .{}` | `var list: ArrayList(T) = .empty` | Deprecated default field values |
-| `var gpa: DebugAllocator(.{}) = .{}` | `var gpa: DebugAllocator(.{}) = .init` | Stateful types use `.init` |
+| `var gpa: DebugAllocator(.{}) = .{}` | `var gpa: SafeAllocator = .init(backing, .{})` | Stateful types use `.init` |
 | `var map: HashMapUnmanaged(...) = .{}` | `var map: HashMapUnmanaged(...) = .empty` | Empty collections use `.empty` |
 
 **Examples:**
@@ -271,7 +271,7 @@ var list: std.ArrayList(u32) = .empty;
 var map: std.AutoHashMapUnmanaged(u32, u32) = .empty;
 
 // CORRECT - use .init for stateful types with internal config
-var gpa: std.heap.DebugAllocator(.{}) = .init;
+var gpa: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
 var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
 ```
 
@@ -288,7 +288,7 @@ These patterns will cause runtime panics or undefined behavior. Flag immediately
 | Self-referential struct copy | Dangling internal pointer | Search for `return self` when struct has self-pointers |
 | Division by runtime variable | Panic if zero | Search for `/` or `%` with non-constant divisor |
 | Inactive union field access | Undefined behavior | Search for union field access without tag check |
-| `@enumFromInt` unchecked | Runtime panic if invalid | Search for `@enumFromInt` without range validation |
+| `@fromBackingInt` unchecked | Runtime panic if invalid | Search for `@fromBackingInt` (was `@enumFromInt`) without range validation |
 
 **Examples:**
 
@@ -416,11 +416,11 @@ fn getInt(v: Value) ?i64 {
 ```
 
 ```zig
-// WRONG - @enumFromInt without validation
+// WRONG - @fromBackingInt (0.16: @enumFromInt) without validation
 const Color = enum(u8) { red = 0, green = 1, blue = 2 };
 
 fn parseColor(byte: u8) Color {
-    return @enumFromInt(byte);  // Panics if byte > 2
+    return @fromBackingInt(byte);  // Panics if byte > 2
 }
 
 // CORRECT - validate range
@@ -436,7 +436,7 @@ These patterns cause memory corruption or defeat safety mechanisms.
 
 | Pattern | Problem | Detection |
 |---------|---------|-----------|
-| Missing `gpa.deinit()` | No leak detection in debug | Search `DebugAllocator` without `defer.*deinit()` |
+| Missing `gpa.deinit()` | No leak detection in debug | Search `SafeAllocator` without `defer.*deinit()` |
 | `@ptrCast` size mismatch | Memory corruption | Search `@ptrCast` between different-sized types |
 | Packed struct field pointer | Unaligned access UB | Search `&packed_struct.field` |
 | `@setRuntimeSafety(false)` | Removes all safety checks | Search for `@setRuntimeSafety(false)` |
@@ -446,7 +446,7 @@ These patterns cause memory corruption or defeat safety mechanisms.
 ```zig
 // WRONG - no leak detection
 pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    var gpa: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
     const allocator = gpa.allocator();
     // ... use allocator ...
     // Missing gpa.deinit() - leaks won't be reported!
@@ -454,7 +454,7 @@ pub fn main() !void {
 
 // CORRECT - deinit reports leaks
 pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    var gpa: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
     defer _ = gpa.deinit();  // Reports leaks on exit
     const allocator = gpa.allocator();
     // ... use allocator ...
@@ -915,10 +915,10 @@ pub fn process(data: []u8) void {
 **Anti-pattern: Regular for over type info**
 ```zig
 fn printFields(comptime T: type) void {
-    const fields = @typeInfo(T).@"struct".fields;
-    for (fields) |field| {
-        // ERROR: field.name is comptime-known but for loop is runtime
-        std.debug.print("{s}\n", .{field.name});
+    const names = @typeInfo(T).@"struct".field_names;
+    for (names) |name| {
+        // ERROR: name is comptime-known but for loop is runtime
+        std.debug.print("{s}\n", .{name});
     }
 }
 ```
@@ -926,9 +926,9 @@ fn printFields(comptime T: type) void {
 **Correct pattern: Use inline for**
 ```zig
 fn printFields(comptime T: type) void {
-    const fields = @typeInfo(T).@"struct".fields;
-    inline for (fields) |field| {
-        std.debug.print("{s}\n", .{field.name});
+    const names = @typeInfo(T).@"struct".field_names;
+    inline for (names) |name| {
+        std.debug.print("{s}\n", .{name});
     }
 }
 ```
@@ -1246,18 +1246,18 @@ fn parseTokens(gpa: Allocator, input: []const u8) ![]Token {
 
 **Observation:** Heap allocation when size is known at comptime
 
-**Suggestion:** Use stack allocation or `bufPrint` when bounded
+**Suggestion:** Use stack allocation or `std.mem.print` when bounded
 
 ```zig
 // ANTI-PATTERN: Heap allocation for known-size buffer
 fn formatVersion(allocator: Allocator, major: u32, minor: u32) ![]u8 {
-    return std.fmt.allocPrint(allocator, "{d}.{d}", .{ major, minor });
+    return allocator.print("{d}.{d}", .{ major, minor });
 }
 
 // BETTER: Stack buffer when max size is bounded
 fn formatVersion(major: u32, minor: u32) []const u8 {
     var buf: [32]u8 = undefined;  // Max: "4294967295.4294967295" = 21 chars
-    return std.fmt.bufPrint(&buf, "{d}.{d}", .{ major, minor }) catch unreachable;
+    return std.mem.print(&buf, "{d}.{d}", .{ major, minor }) catch unreachable;
 }
 
 // ANTI-PATTERN: Heap allocation for fixed-size array
@@ -1287,7 +1287,7 @@ fn isVowel(c: u8) bool {
 // BETTER: Comptime lookup table
 fn isVowel(c: u8) bool {
     const table = comptime blk: {
-        var t: [256]bool = .{false} ** 256;
+        var t: [256]bool = @splat(false);
         for ("aeiouAEIOU") |v| t[v] = true;
         break :blk t;
     };
@@ -1406,7 +1406,7 @@ const Data = extern struct {
 ```zig
 // ANTI-PATTERN: Production allocator in tests
 test "parsing" {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    var gpa: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
     defer _ = gpa.deinit();
     const result = try parse(gpa.allocator(), input);
     // ...
@@ -1536,7 +1536,7 @@ This pattern is common for context types passed to hash maps and other generic c
 | `catch unreachable` | Runtime panic | On allocator calls |
 | `return &local` | Dangling pointer | Returning address of stack variable |
 | `&packed.field` | Undefined behavior | Pointer to packed struct field |
-| Missing `gpa.deinit()` | No leak detection | `DebugAllocator` without defer deinit |
+| Missing `gpa.deinit()` | No leak detection | `SafeAllocator` without defer deinit |
 | Missing standard opts | No cross-compile | `build.zig` without `standardTargetOptions` |
 
 ### Context-Dependent Checks
@@ -1555,7 +1555,7 @@ This pattern is common for context types passed to hash maps and other generic c
 |---------|------------|-----------|
 | Scattered imports | std first, then third-party, then local | [3.9](#39-import-organization) |
 | Global allocator | Accept as parameter | [3.10](#310-allocator-design) |
-| `allocPrint` for bounded | Use `bufPrint` with stack buffer | [3.11](#311-stack-vs-heap-allocation) |
+| `allocator.print` for bounded | Use `std.mem.print` with stack buffer | [3.11](#311-stack-vs-heap-allocation) |
 | Runtime constant lookup | Comptime lookup table | [3.12](#312-comptime-optimization) |
 | `expectEqual` for strings | Use `expectEqualStrings` | [3.15](#315-testing-best-practices) |
 

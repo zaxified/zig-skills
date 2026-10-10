@@ -70,7 +70,7 @@ pub fn build(b: *std.Build) void {
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| run_cmd.addArgs(args);
+    run_cmd.addPassthruArgs();  // forwards `zig build run -- args` (was: if (b.args) |args| run_cmd.addArgs(args))
 
     const run_step = b.step("run", "Run the application");
     run_step.dependOn(&run_cmd.step);
@@ -127,7 +127,7 @@ const target = b.standardTargetOptions(.{
 });
 
 const optimize = b.standardOptimizeOption(.{
-    .preferred_optimize_mode = .ReleaseFast,  // Default for --release
+    .preferred_optimize_mode = .fast,  // Default for --release
 });
 ```
 
@@ -150,7 +150,7 @@ const wasm_module = b.addExecutable(.{
     .root_module = b.createModule(.{
         .root_source_file = b.path("src/wasm.zig"),
         .target = wasm_target,
-        .optimize = .ReleaseSmall,
+        .optimize = .small,
     }),
 });
 ```
@@ -165,7 +165,7 @@ const codegen_tool = b.addExecutable(.{
     .root_module = b.createModule(.{
         .root_source_file = b.path("tools/codegen.zig"),
         .target = b.graph.host,  // Always builds for the machine running the build
-        .optimize = .ReleaseFast,
+        .optimize = .fast,
     }),
 });
 
@@ -412,11 +412,11 @@ const gen_tool = b.addExecutable(.{
 const run_gen = b.addRunArtifact(gen_tool);
 
 // Directory input with prefix (--shader-dir=/path/to/shaders)
-run_gen.addPrefixedDirectoryArg("--shader-dir=", b.path("data/shaders"));
+run_gen.addDirectoryArg2(b.path("data/shaders"), .{ .prefix = "--shader-dir=" });
 
 // Output file with prefix (--out=/path/to/output.h)
 // Returns LazyPath to the generated file
-const generated_header = run_gen.addPrefixedOutputFileArg("--out=", "shaders.h");
+const generated_header = run_gen.addOutputFileArg2("shaders.h", .{ .prefix = "--out=" });
 
 // The step now has data dependencies: if shaders change, it re-runs
 ```
@@ -481,7 +481,7 @@ Lazy dependencies are only fetched when actually used, avoiding unnecessary down
     .@"dawn-windows-x64" = .{
         .url = "https://github.com/example/dawn/releases/download/v1.0/dawn-windows-x64.tar.gz",
         .hash = "1220abc...",
-        .lazy = true,  // Only fetched when lazyDependency() is called
+        .lazy = true,  // Only fetched when dependencyLazy() is called
     },
     .@"dawn-linux-x64" = .{
         .url = "https://github.com/example/dawn/releases/download/v1.0/dawn-linux-x64.tar.gz",
@@ -493,10 +493,12 @@ Lazy dependencies are only fetched when actually used, avoiding unnecessary down
 
 **In build.zig:**
 ```zig
-// lazyDependency returns ?*Dependency (null if not yet fetched)
+// dependencyLazy returns error.LazyDependencyNeeded if the package is not fetched yet;
+// `build` must return it (pub fn build(b: *std.Build) !void) so the build system can fetch it.
+// (lazyDependency, returning ?*Dependency, still exists but is deprecated.)
 const dawn_dep = switch (target.result.os.tag) {
-    .windows => b.lazyDependency("dawn-windows-x64", .{}),
-    .linux => b.lazyDependency("dawn-linux-x64", .{}),
+    .windows => try b.dependencyLazy("dawn-windows-x64", .{}),
+    .linux => try b.dependencyLazy("dawn-linux-x64", .{}),
     else => null,
 };
 
@@ -507,7 +509,7 @@ if (dawn_dep) |dep| {
 }
 ```
 
-**How it works:** After the build graph is constructed, `zig build` checks if any `lazyDependency()` calls require unfetched dependencies (returned null). If so, it fetches them and re-runs the build script with the dependencies now available.
+**How it works:** After the build graph is constructed, `zig build` checks if any `dependencyLazy()` calls require unfetched dependencies (`error.LazyDependencyNeeded`). If so, it fetches them and re-runs the build script with the dependencies now available.
 
 ### Passing Options to Dependencies
 ```zig
@@ -526,9 +528,7 @@ const dep = b.dependency("configurable_lib", .{
 const run_cmd = b.addRunArtifact(exe);
 
 // Pass command line arguments
-if (b.args) |args| {
-    run_cmd.addArgs(args);
-}
+run_cmd.addPassthruArgs();  // was: if (b.args) |args| run_cmd.addArgs(args)
 
 // Fixed arguments
 run_cmd.addArgs(&.{ "--config", "debug.json" });
@@ -563,7 +563,7 @@ const tool = b.addExecutable(.{
     .root_module = b.createModule(.{
         .root_source_file = b.path("tools/codegen.zig"),
         .target = b.graph.host,  // Build for host
-        .optimize = .ReleaseFast,
+        .optimize = .fast,
     }),
 });
 
@@ -571,7 +571,7 @@ const run_tool = b.addRunArtifact(tool);
 run_tool.addArgs(&.{ "input.json" });
 
 // Capture generated output
-const generated = run_tool.addOutputFileArg("generated.zig");
+const generated = run_tool.addOutputFileArg2("generated.zig", .{});
 
 // Use as source file
 exe.root_module.addAnonymousImport("generated", .{
@@ -727,7 +727,7 @@ const gen_tool = b.addExecutable(.{
 
 const gen_run = b.addRunArtifact(gen_tool);
 gen_run.addFileArg(b.path("schema.json"));
-const generated = gen_run.addOutputFileArg("generated.zig");
+const generated = gen_run.addOutputFileArg2("generated.zig", .{});
 
 exe.root_module.addAnonymousImport("schema", .{
     .root_source_file = generated,
@@ -883,7 +883,7 @@ const src = b.path("src/main.zig");
 
 // From build step output (returns generated variant)
 const bin = exe.getEmittedBin();
-const generated = run_step.addOutputFileArg("output.txt");
+const generated = run_step.addOutputFileArg2("output.txt", .{});
 
 // From dependency (returns dependency variant)
 const dep_header = zlib.path("include/zlib.h");
@@ -897,7 +897,7 @@ When passing LazyPaths between steps, use `addStepDependencies()` to ensure prop
 
 ```zig
 const gen_step = b.addRunArtifact(generator);
-const generated_file = gen_step.addOutputFileArg("data.bin");
+const generated_file = gen_step.addOutputFileArg2("data.bin", .{});
 
 // IMPORTANT: Establish that compile step depends on gen_step's output
 generated_file.addStepDependencies(&exe.step);
@@ -1093,7 +1093,7 @@ for (targets) |t| {
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = resolved,
-            .optimize = .ReleaseFast,
+            .optimize = .fast,
         }),
     });
     b.installArtifact(exe);

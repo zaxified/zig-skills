@@ -320,7 +320,7 @@ const lib = b.addLibrary(.{
     .root_module = b.createModule(.{
         .root_source_file = b.path("src/lib.zig"),
         .target = mac_arm,
-        .optimize = .ReleaseFast,
+        .optimize = .fast,
     }),
 });
 ```
@@ -346,7 +346,7 @@ for (targets) |t| {
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/lib.zig"),
             .target = resolved,
-            .optimize = .ReleaseFast,
+            .optimize = .fast,
         }),
     });
     b.installArtifact(lib);
@@ -492,7 +492,7 @@ pub fn build(b: *std.Build) void {
     const lipo = b.addSystemCommand(&.{
         "lipo", "-create", "-output",
     });
-    const universal_lib = lipo.addOutputFileArg("libmylib.a");
+    const universal_lib = lipo.addOutputFileArg2("libmylib.a", .{});
     lipo.addFileArg(lib_arm64.getEmittedBin());
     lipo.addFileArg(lib_x86_64.getEmittedBin());
 

@@ -101,22 +101,27 @@ const Component = union(enum) {
 
 ### Getting Host
 
+**0.17:** `Uri.getHost` moved to `std.Io.net.HostName.fromUri`, and it now *validates* the host
+as an RFC 1123 host name (RFC 3986 allows hosts that are not valid DNS names, so the error set is
+different). `Uri.getHostAlloc` is gone. `uri.host` itself (a `Component`) is unchanged — use it
+directly when you need the RFC 3986 host without host-name rules.
+
 ```zig
-// 0.16: no std.Uri.host_name_max — use std.Io.net.HostName.max_len; getHost() returns a HostName, not a raw slice
+// WRONG (0.17): const host = try uri.getHost(&buffer);   // @compileError: moved
 var buffer: [std.Io.net.HostName.max_len]u8 = undefined;
-const host = uri.getHost(&buffer) catch |err| switch (err) {
+const host = std.Io.net.HostName.fromUri(uri, &buffer) catch |err| switch (err) {
     error.UriMissingHost => return error.NoHost,
-    error.UriHostTooLong => return error.HostTooLong,
+    error.NameTooLong, error.InvalidHostName => return error.BadHost,
 };
+// host.bytes may point into `buffer` or into `uri.host`.
 ```
 
-With allocation:
+Without host-name validation (any RFC 3986 host, percent-decoded):
 
 ```zig
-var arena = std.heap.ArenaAllocator.init(allocator);
-defer arena.deinit();
-
-const host = try uri.getHostAlloc(arena.allocator());
+const component = uri.host orelse return error.NoHost;
+var buffer: [256]u8 = undefined;
+const raw_host = try component.toRaw(&buffer); // error.NoSpaceLeft if it does not fit
 ```
 
 ### Creating URIs Programmatically
@@ -316,7 +321,7 @@ fn getQueryParam(uri: std.Uri, key: []const u8) ?[]const u8 {
 
     var iter = std.mem.splitScalar(u8, query_str, '&');
     while (iter.next()) |pair| {
-        if (std.mem.indexOfScalar(u8, pair, '=')) |eq_pos| {
+        if (std.mem.findScalar(u8, pair, '=')) |eq_pos| {
             if (std.mem.eql(u8, pair[0..eq_pos], key)) {
                 return pair[eq_pos + 1 ..];
             }
@@ -355,7 +360,7 @@ fn buildUrl(allocator: Allocator, base: []const u8, params: []const [2][]const u
             if (isUnreserved(c)) {
                 try result.append(allocator, c);
             } else {
-                try result.appendSlice(allocator, try std.fmt.allocPrint(allocator, "%{X:0>2}", .{c}));
+                try result.print(allocator, "%{X:0>2}", .{c}); // formats in place, nothing to free
             }
         }
 
@@ -366,7 +371,7 @@ fn buildUrl(allocator: Allocator, base: []const u8, params: []const [2][]const u
             if (isUnreserved(c)) {
                 try result.append(allocator, c);
             } else {
-                try result.appendSlice(allocator, try std.fmt.allocPrint(allocator, "%{X:0>2}", .{c}));
+                try result.print(allocator, "%{X:0>2}", .{c}); // formats in place, nothing to free
             }
         }
     }
@@ -478,9 +483,10 @@ pub const ResolveInPlaceError = ParseError || error{
 ### Component Errors
 
 ```zig
-// getHost errors
+// HostName.fromUri errors (0.17)
 error.UriMissingHost   // URI has no host component
-error.UriHostTooLong   // Host exceeds host_name_max (255)
+error.NameTooLong      // longer than HostName.max_len (254)
+error.InvalidHostName  // not a valid RFC 1123 host name
 
 // toRaw errors
 error.NoSpaceLeft      // Buffer too small for decoded string

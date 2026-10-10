@@ -143,23 +143,23 @@ const small: u8 = @truncate(@as(u32, 0x12345678));  // 0x78
 const x: u8 = @intFromBool(true);  // 1
 ```
 
-### @intFromEnum
+### @backingInt
 ```zig
-@intFromEnum(value: anytype) anytype
+@backingInt(value: anytype) anytype
 ```
-Enum → backing integer type.
+Enum → backing integer type. (0.17: replaces `@intFromEnum`.)
 ```zig
 const State = enum(u8) { idle = 0, running = 1 };
-const n: u8 = @intFromEnum(State.running);  // 1
+const n: u8 = @backingInt(State.running);  // 1
 ```
 
-### @enumFromInt
+### @fromBackingInt
 ```zig
-@enumFromInt(int: anytype) anytype
+@fromBackingInt(int: anytype) anytype
 ```
-Integer → enum. Return type inferred.
+Integer → enum. Return type inferred. (0.17: replaces `@enumFromInt`.) The argument must have exactly the enum's backing integer type; use `@fromBackingInt(@intCast(i))` when `i` is wider.
 ```zig
-const state: State = @enumFromInt(1);  // State.running
+const state: State = @fromBackingInt(1);  // State.running
 ```
 
 ### @errorFromInt
@@ -170,7 +170,7 @@ Integer → error. Return type inferred.
 
 ### @intFromError
 ```zig
-@intFromError(err: anytype) std.meta.Int(.unsigned, @bitSizeOf(anyerror))
+@intFromError(err: anytype) @Int(.unsigned, @bitSizeOf(anyerror))
 ```
 Error → integer.
 
@@ -476,23 +476,42 @@ const T = @TypeOf(some_value);
 
 ### @typeInfo
 ```zig
-@typeInfo(comptime T: type) std.builtin.Type
+@typeInfo(comptime T: type) std.lang.Type
 ```
 Get detailed type information.
 ```zig
 const info = @typeInfo(MyStruct);
 if (info == .@"struct") {
-    for (info.@"struct".fields) |field| {
-        // field.name, field.type, etc.
+    // 0.17: struct-of-arrays (field_names, field_types, field_attrs)
+    for (info.@"struct".field_names, info.@"struct".field_types) |name, FieldT| {
+        // name, FieldT, etc.
     }
 }
 ```
 
-### @Type
+### Type-creating builtins (`@Type` is gone since 0.16)
 ```zig
-@Type(comptime info: std.builtin.Type) type
+@Int(comptime signedness: std.lang.Signedness, comptime bits: u16) type
+@Tuple(comptime field_types: []const type) type
+@Struct(layout: std.lang.Type.ContainerLayout, BackingInt: ?type,
+        field_names: []const []const u8, field_types: *const [field_names.len]type,
+        field_attrs: *const [field_names.len]std.lang.Type.Struct.FieldAttributes) type
+@Union(layout: std.lang.Type.ContainerLayout, ArgType: ?type, // enum tag type, or backing int if packed
+       field_names: []const []const u8, field_types: *const [field_names.len]type,
+       field_attrs: *const [field_names.len]std.lang.Type.Union.FieldAttributes) type
+@Enum(TagInt: type, mode: std.lang.Type.Enum.Mode,
+      field_names: []const []const u8, field_values: *const [field_names.len]TagInt) type
+@Pointer(size: std.lang.Type.Pointer.Size, attrs: std.lang.Type.Pointer.Attributes,
+         Element: type, sentinel: ?Element) type
+@Fn(param_types: []const type, param_attrs: *const [param_types.len]std.lang.Type.Fn.ParamAttributes,
+    ReturnType: type, attrs: std.lang.Type.Fn.Attributes) type
 ```
-Create type from type info (inverse of `@typeInfo`).
+All arguments are comptime. Each is the inverse of the matching `@typeInfo` shape (0.17:
+struct-of-arrays). `@splat(.{})` gives default attributes for every field:
+```zig
+const U10 = @Int(.unsigned, 10);
+const Point = @Struct(.auto, null, &.{ "x", "y" }, &.{ f32, f32 }, &@splat(.{}));
+```
 
 ### @typeName
 ```zig
@@ -616,7 +635,7 @@ fn method(self: *Self) void { ... }
 
 ### @src
 ```zig
-@src() std.builtin.SourceLocation
+@src() std.lang.SourceLocation
 ```
 Get current source location (file, line, column, fn name).
 
@@ -665,7 +684,7 @@ const ones: @Vector(4, f32) = @splat(1.0);
 
 ### @reduce
 ```zig
-@reduce(comptime op: std.builtin.ReduceOp, value: anytype) ElementType
+@reduce(comptime op: std.lang.ReduceOp, value: anytype) ElementType
 ```
 Reduce vector to scalar.
 ```zig
@@ -694,35 +713,42 @@ Element-wise select: `pred[i] ? a[i] : b[i]`.
 
 ## C Interop
 
-### @cImport
-```zig
-@cImport(expr) type
+### `@cImport`, `@cInclude`, `@cDefine`, `@cUndef` — removed (0.17)
+C headers are translated by the `translate-c` package in `build.zig`, and the result is imported
+as an ordinary module:
+```bash
+zig fetch --save git+https://codeberg.org/ziglang/translate-c
 ```
-Import C header files.
 ```zig
-const c = @cImport({
-    @cDefine("_GNU_SOURCE", {});
-    @cInclude("stdio.h");
-});
-```
+// build.zig
+const Translator = @import("translate_c").Translator;
 
-### @cInclude
-```zig
-@cInclude(comptime path: []const u8) void
-```
-Include C header (inside `@cImport`).
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+    const translator: Translator = .init(b.dependency("translate_c", .{}), .{
+        .c_source_file = b.path("src/c.h"),  // #define _GNU_SOURCE / #include <stdio.h> go here
+        .target = target,
+        .optimize = optimize,
+        .link_system_libs = &.{.{ .name = "glfw" }},
+    });
+    const exe = b.addExecutable(.{
+        .name = "app",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "c", .module = translator.mod }},
+        }),
+    });
+    b.installArtifact(exe);
+}
 
-### @cDefine
-```zig
-@cDefine(comptime name: []const u8, value) void
+// src/main.zig
+const c = @import("c");
 ```
-Define C macro (inside `@cImport`).
-
-### @cUndef
-```zig
-@cUndef(comptime name: []const u8) void
-```
-Undefine C macro.
+`b.addTranslateC` still exists but is deprecated in favor of the package. More options:
+https://codeberg.org/ziglang/translate-c#options
 
 ### @extern
 ```zig
@@ -741,7 +767,7 @@ Export symbol. **Takes pointer in 0.14.0+**.
 
 ### C Varargs
 ```zig
-@cVaStart() std.builtin.VaList    // Start vararg processing
+@cVaStart() std.lang.VaList    // Start vararg processing
 @cVaArg(*VaList, T) T             // Get next vararg
 @cVaCopy(*VaList) VaList          // Copy vararg state
 @cVaEnd(*VaList) void             // End vararg processing
@@ -751,7 +777,7 @@ Export symbol. **Takes pointer in 0.14.0+**.
 
 ### @branchHint
 ```zig
-@branchHint(hint: std.builtin.BranchHint) void
+@branchHint(hint: std.lang.BranchHint) void
 ```
 Hint branch likelihood. Must be first statement in branch.
 ```zig
@@ -792,7 +818,7 @@ Enable/disable safety checks in current scope.
 
 ### @setFloatMode
 ```zig
-@setFloatMode(mode: std.builtin.FloatMode) void
+@setFloatMode(mode: std.lang.FloatMode) void
 ```
 Set floating-point optimization mode.
 ```zig
@@ -813,13 +839,13 @@ Get frame pointer of current function.
 
 ### @errorReturnTrace
 ```zig
-@errorReturnTrace() ?*std.builtin.StackTrace
+@errorReturnTrace() ?*std.lang.StackTrace
 ```
 Get error return trace (if available).
 
 ### @call
 ```zig
-@call(modifier: std.builtin.CallModifier, fn: anytype, args: anytype) anytype
+@call(modifier: std.lang.CallModifier, fn: anytype, args: anytype) anytype
 ```
 Call function with modifier.
 ```zig

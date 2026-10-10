@@ -271,26 +271,26 @@ const h = std.fmt.hex(@as(u32, 0xdeadbeef));  // "efbeadde"
 
 ## Buffer Printing
 
-### bufPrint
+### bufPrint (std.mem.print)
 
-Format into a fixed buffer, returns slice of written data.
+Format into a fixed buffer, returns slice of written data. (0.17: `std.fmt.bufPrint` was renamed to `std.mem.print`.)
 
 ```zig
 var buf: [256]u8 = undefined;
-const result = try std.fmt.bufPrint(&buf, "Hello {s}!", .{"world"});
+const result = try std.mem.print(&buf, "Hello {s}!", .{"world"});
 // result = "Hello world!"
 ```
 
 **Errors:**
 - `error.NoSpaceLeft` - Buffer too small
 
-### bufPrintZ
+### printSentinel
 
 Format into buffer with null terminator.
 
 ```zig
 var buf: [256]u8 = undefined;
-const result = try std.fmt.bufPrintZ(&buf, "Hello {s}!", .{"world"});
+const result = try std.mem.printSentinel(&buf, "Hello {s}!", .{"world"}, 0);
 // result is [:0]u8 = "Hello world!" (null-terminated)
 ```
 
@@ -305,23 +305,23 @@ const len = std.fmt.count("Value: {d}, Name: {s}", .{ 42, "test" });
 
 ## Allocating Print
 
-### allocPrint
+### Allocator.print
 
 Format with dynamic allocation.
 
 ```zig
 const allocator = std.heap.page_allocator;
-const result = try std.fmt.allocPrint(allocator, "Hello {s}!", .{"world"});
+const result = try allocator.print("Hello {s}!", .{"world"});
 defer allocator.free(result);
 // result = "Hello world!"
 ```
 
-### allocPrintSentinel
+### Allocator.printSentinel
 
 Format with allocation and sentinel terminator.
 
 ```zig
-const result = try std.fmt.allocPrintSentinel(allocator, "Hello {s}", .{"world"}, 0);
+const result = try allocator.printSentinel("Hello {s}", .{"world"}, 0);
 defer allocator.free(result);
 // result is [:0]u8 = "Hello world" (null-terminated)
 ```

@@ -13,21 +13,21 @@ Densely stored sets of integers with efficient set operations (union, intersecti
 
 | Type | Size | Allocation |
 |------|------|------------|
-| `IntegerBitSet(N)` | Compile-time, N <= 128 | None (single integer) |
-| `ArrayBitSet(usize, N)` | Compile-time, any N | None (array) |
-| `StaticBitSet(N)` | Compile-time | Auto-selects Integer or Array |
-| `DynamicBitSet` | Runtime | Allocator (managed) |
-| `DynamicBitSetUnmanaged` | Runtime | Allocator (unmanaged) |
+| `bit_set.Integer(N)` | Compile-time, N <= 128 | None (single integer) |
+| `bit_set.Array(usize, N)` | Compile-time, any N | None (array) |
+| `bit_set.Static(N)` | Compile-time | Auto-selects Integer or Array |
+| `bit_set.Dynamic` | Runtime | Allocator (unmanaged, preferred) |
+| `bit_set.DynamicManaged` | Runtime | Allocator (managed, deprecated) |
 
 ## Static Bit Set (Compile-Time Size)
 
 ```zig
 const std = @import("std");
 
-// StaticBitSet auto-selects best implementation
-const Flags = std.StaticBitSet(64);
+// Static auto-selects best implementation (was StaticBitSet before 0.17)
+const Flags = std.bit_set.Static(64);
 
-var flags = Flags.initEmpty();
+var flags: Flags = .empty;  // .full for all bits set (was initEmpty()/initFull())
 flags.set(5);
 flags.set(10);
 
@@ -44,26 +44,26 @@ const count = flags.count();  // number of set bits
 ## Dynamic Bit Set (Runtime Size)
 
 ```zig
-var bits = try std.DynamicBitSet.initEmpty(allocator, 1000);
-defer bits.deinit();
+var bits = try std.bit_set.Dynamic.initEmpty(allocator, 1000);
+defer bits.deinit(allocator);
 
 bits.set(42);
 bits.set(100);
 
 // Resize dynamically
-try bits.resize(2000, false);  // false = new bits are 0
-try bits.resize(2000, true);   // true = new bits are 1
+try bits.resize(allocator, 2000, false);  // false = new bits are 0
+try bits.resize(allocator, 2000, true);   // true = new bits are 1
 
 // Clone
 var copy = try bits.clone(allocator);
-defer copy.deinit();
+defer copy.deinit(allocator);
 ```
 
 ## Set Operations
 
 ```zig
-var a = Flags.initEmpty();
-var b = Flags.initEmpty();
+var a: Flags = .empty;
+var b: Flags = .empty;
 a.set(1); a.set(2);
 b.set(2); b.set(3);
 
@@ -99,7 +99,7 @@ if (a.supersetOf(b)) {
 ## Iteration
 
 ```zig
-var flags = Flags.initEmpty();
+var flags: Flags = .empty;
 flags.set(1); flags.set(5); flags.set(10);
 
 // Iterate set bits (ascending order by default)
@@ -151,7 +151,7 @@ flags.toggleAll();  // flip every bit
 
 ```zig
 // For when you don't want to store the allocator
-var bits: std.DynamicBitSetUnmanaged = .{};
+var bits: std.bit_set.Dynamic = .{};
 try bits.resize(allocator, 100, false);
 defer bits.deinit(allocator);
 
@@ -171,26 +171,26 @@ const Permission = enum(u8) {
     admin = 4,
 };
 
-const Permissions = std.StaticBitSet(8);
+const Permissions = std.bit_set.Static(8);
 
 fn hasPermission(perms: Permissions, p: Permission) bool {
-    return perms.isSet(@intFromEnum(p));
+    return perms.isSet(@backingInt(p));
 }
 
 fn grant(perms: *Permissions, p: Permission) void {
-    perms.set(@intFromEnum(p));
+    perms.set(@backingInt(p));
 }
 
 fn revoke(perms: *Permissions, p: Permission) void {
-    perms.unset(@intFromEnum(p));
+    perms.unset(@backingInt(p));
 }
 
 pub fn main() void {
-    var user_perms = Permissions.initEmpty();
+    var user_perms = Permissions.empty;
     grant(&user_perms, .read);
     grant(&user_perms, .write);
 
-    const admin_perms = Permissions.initFull();
+    const admin_perms = Permissions.full;
 
     // Check if user has all admin permissions
     if (user_perms.subsetOf(admin_perms)) {
@@ -204,8 +204,8 @@ pub fn main() void {
 
 ## Notes
 
-- `StaticBitSet` is zero-allocation, copyable by value
-- `DynamicBitSet` requires allocation, call `deinit()`
-- `initFull()` creates set with all bits set
+- `bit_set.Static` is zero-allocation, copyable by value
+- `bit_set.Dynamic` requires allocation, call `deinit(allocator)`
+- `.full` is the set with all bits set, `.empty` the empty one (Static/Integer/Array; `Dynamic.initFull(allocator, n)` is unchanged)
 - Iteration order is index order, not insertion order
 - Use `std.enums.EnumSet` for enum-based bit flags

@@ -300,7 +300,7 @@ pub fn StaticHashMap(comptime K: type, comptime V: type, comptime capacity: usiz
     const shift = 63 - math.log2_int(u64, capacity) + 1;
     const overflow = capacity / 10 + (63 - @as(u64, shift) + 1) << 1;
     return struct {
-        entries: [capacity + overflow]Entry = [_]Entry{.{}} ** (capacity + overflow),
+        entries: [capacity + overflow]Entry = @splat(.{}),
         len: usize = 0,
     };
 }
@@ -362,7 +362,7 @@ Entire sync state fits in one `u32` — CAS updates are all-or-nothing. State ma
 ### Platform-Specific Mutex with Debug Tracking (Bun)
 
 ```zig
-const Impl = if (builtin.mode == .Debug and !builtin.single_threaded)
+const Impl = if (builtin.mode == .debug and !builtin.single_threaded)
     DebugImpl
 else
     ReleaseImpl;
@@ -593,7 +593,7 @@ pub const MTLResourceOptions = packed struct(c_ulong) {
     cpu_cache_mode: CPUCacheMode = .default,
     storage_mode: StorageMode,
     hazard_tracking_mode: HazardTrackingMode = .default,
-    _pad: @Type(.{ .int = .{ .signedness = .unsigned, .bits = @bitSizeOf(c_ulong) - 10 } }) = 0,
+    _pad: @Int(.unsigned, @bitSizeOf(c_ulong) - 10) = 0,
 
     pub const StorageMode = enum(u4) { shared = 0, managed = 1, private = 2, memoryless = 3 };
 };
@@ -636,15 +636,15 @@ pub fn EnumUnionType(
     comptime Enum: type,
     comptime TypeForVariant: fn (comptime variant: Enum) type,
 ) type {
-    var fields: [std.enums.values(Enum).len]std.builtin.Type.UnionField = undefined;
-    for (std.enums.values(Enum), 0..) |variant, i| {
-        fields[i] = .{
-            .name = @tagName(variant),
-            .type = TypeForVariant(variant),
-            .alignment = @alignOf(TypeForVariant(variant)),
-        };
+    const variants = std.enums.values(Enum);
+    var names: [variants.len][]const u8 = undefined;
+    var types: [variants.len]type = undefined;
+    for (variants, 0..) |variant, i| {
+        names[i] = @tagName(variant);
+        types[i] = TypeForVariant(variant);
     }
-    return @Type(.{ .@"union" = .{ .layout = .auto, .fields = &fields, .decls = &.{}, .tag_type = Enum } });
+    // Default attributes: natural alignment for every field.
+    return @Union(.auto, Enum, &names, &types, &@splat(.{}));
 }
 ```
 
@@ -698,8 +698,8 @@ Zero-cost branch elimination. Each specialization is a distinct type with no run
 ```zig
 pub fn banFieldType(comptime Container: type, comptime T: type) void {
     comptime {
-        for (std.meta.fields(Container)) |field| {
-            if (field.type == T)
+        for (@typeInfo(Container).@"struct".field_types) |field_type| {
+            if (field_type == T)
                 @compileError("Field of type " ++ @typeName(T) ++ " not allowed");
         }
     }
@@ -810,8 +810,8 @@ Module-level test references all submodules. Platform-specific tests only compil
 
 ```zig
 pub const inlineAssert = switch (builtin.mode) {
-    .Debug => std.debug.assert,
-    .ReleaseSmall, .ReleaseSafe, .ReleaseFast => (struct {
+    .debug => std.debug.assert,
+    .safe, .fast, .small => (struct {
         inline fn assert(ok: bool) void { if (!ok) unreachable; }
     }).assert,
 };

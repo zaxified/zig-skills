@@ -7,9 +7,7 @@ Comptime type introspection and manipulation utilities. Essential for generic pr
 | Function | Purpose |
 |----------|---------|
 | `stringToEnum(T, str)` | Convert string to enum variant |
-| `fields(T)` | Get struct/union/enum/error fields |
-| `fieldNames(T)` | Get field names as string slice |
-| `fieldInfo(T, field)` | Get info for specific field |
+| `@typeInfo(T)` | Field data (0.17: `std.meta.fields` is a compile error; `fieldNames`/`fieldInfo`/`fieldTypes` are deprecated) |
 | `fieldIndex(T, name)` | Get field index by name |
 | `tags(T)` | Get all enum/error set values |
 | `Tag(T)` | Get tag type of enum/union |
@@ -45,6 +43,8 @@ Uses `StaticStringMap` for small enums (≤100 variants), inline iteration for l
 
 ### Get All Fields
 
+In 0.17 `@typeInfo` is struct-of-arrays: names, types and attributes are parallel slices.
+
 ```zig
 const Point = struct {
     x: f32,
@@ -53,29 +53,31 @@ const Point = struct {
 };
 
 // Get struct fields
-const point_fields = std.meta.fields(Point);
-// point_fields.len == 3
-// point_fields[0].name == "x"
-// point_fields[0].type == f32
+const info = @typeInfo(Point).@"struct";
+// info.field_names.len == 3
+// info.field_names[0] == "x"
+// info.field_types[0] == f32
+// info.field_attrs[2].default_value_ptr != null (z has a default)
 
 // Works for unions
 const Result = union { ok: u32, err: []const u8 };
-const union_fields = std.meta.fields(Result);
+const union_names = @typeInfo(Result).@"union".field_names;
 
 // Works for enums
 const Status = enum { pending, done };
-const enum_fields = std.meta.fields(Status);
+const enum_names = @typeInfo(Status).@"enum".field_names;
+const enum_values = @typeInfo(Status).@"enum".field_values;
 
-// Works for error sets
+// Works for error sets (null means anyerror)
 const MyError = error{ NotFound, Timeout };
-const error_fields = std.meta.fields(MyError);
+const error_names = @typeInfo(MyError).error_set.error_names.?;
 ```
 
 ### Get Field Names
 
 ```zig
-const names = std.meta.fieldNames(Point);
-// names.* == .{ "x", "y", "z" }
+const names = @typeInfo(Point).@"struct".field_names;
+// names == .{ "x", "y", "z" }
 
 for (names) |name| {
     std.debug.print("{s}\n", .{name});
@@ -85,14 +87,11 @@ for (names) |name| {
 ### Get Specific Field
 
 ```zig
-// By enum literal
-const x_info = std.meta.fieldInfo(Point, .x);
-// x_info.name == "x"
-// x_info.type == f32
-// x_info.default_value_ptr == null
-
-const z_info = std.meta.fieldInfo(Point, .z);
-// z_info.default_value_ptr != null (has default 0)
+// By index (see fieldIndex below)
+const x_idx = std.meta.fieldIndex(Point, "x").?;
+const x_type = @typeInfo(Point).@"struct".field_types[x_idx];  // f32
+const z_attrs = @typeInfo(Point).@"struct".field_attrs[2];
+// z_attrs.default_value_ptr != null (has default 0)
 
 // Get field index
 const idx = std.meta.fieldIndex(Point, "y");  // 1
@@ -147,9 +146,8 @@ const PointField = std.meta.FieldEnum(Point);
 // Equivalent to: enum { x, y }
 
 // Iterate fields generically
-inline for (std.meta.tags(PointField)) |field| {
-    const info = std.meta.fieldInfo(Point, field);
-    std.debug.print("{s}: {s}\n", .{ info.name, @typeName(info.type) });
+inline for (@typeInfo(Point).@"struct".field_names, @typeInfo(Point).@"struct".field_types) |name, FieldT| {
+    std.debug.print("{s}: {s}\n", .{ name, @typeName(FieldT) });
 }
 ```
 
@@ -170,8 +168,8 @@ const ApiMethod = std.meta.DeclEnum(Api);
 ### Int/Float Type Construction
 
 ```zig
-const U24 = std.meta.Int(.unsigned, 24);  // u24
-const I7 = std.meta.Int(.signed, 7);      // i7
+const U24 = @Int(.unsigned, 24);  // u24
+const I7 = @Int(.signed, 7);      // i7 (0.17: builtin replaces std.meta.Int)
 const F32 = std.meta.Float(32);           // f32
 const F16 = std.meta.Float(16);           // f16
 ```
@@ -180,7 +178,7 @@ const F16 = std.meta.Float(16);           // f16
 
 ```zig
 // From type array
-const T1 = std.meta.Tuple(&.{ u32, f32, bool });
+const T1 = @Tuple(&.{ u32, f32, bool });  // 0.17: builtin replaces std.meta.Tuple
 // Equivalent to: struct { u32, f32, bool }
 
 // From function signature
@@ -391,9 +389,9 @@ Use case: Allocating objects with many optional components where memory matters.
 ```zig
 fn printStruct(value: anytype) void {
     const T = @TypeOf(value);
-    inline for (std.meta.fields(T)) |field| {
-        const v = @field(value, field.name);
-        std.debug.print("{s}: {any}\n", .{ field.name, v });
+    inline for (@typeInfo(T).@"struct".field_names) |name| {
+        const v = @field(value, name);
+        std.debug.print("{s}: {any}\n", .{ name, v });
     }
 }
 ```
@@ -403,11 +401,12 @@ fn printStruct(value: anytype) void {
 ```zig
 fn createDefault(comptime T: type) T {
     var result: T = undefined;
-    inline for (std.meta.fields(T)) |field| {
-        if (field.default_value_ptr) |ptr| {
-            @field(result, field.name) = @as(*const field.type, @ptrCast(@alignCast(ptr))).*;
+    const info = @typeInfo(T).@"struct";
+    inline for (info.field_names, info.field_types, info.field_attrs) |name, FieldT, attrs| {
+        if (attrs.default_value_ptr) |ptr| {
+            @field(result, name) = @as(*const FieldT, @ptrCast(@alignCast(ptr))).*;
         } else {
-            @field(result, field.name) = std.mem.zeroes(field.type);
+            @field(result, name) = std.mem.zeroes(FieldT);
         }
     }
     return result;
@@ -417,9 +416,9 @@ fn createDefault(comptime T: type) T {
 ### Dynamic Field Access
 
 ```zig
-fn getField(comptime T: type, value: T, comptime name: []const u8) ?std.meta.fieldInfo(T, std.meta.stringToEnum(std.meta.FieldEnum(T), name) orelse return null).type {
-    const field = std.meta.stringToEnum(std.meta.FieldEnum(T), name) orelse return null;
-    return @field(value, @tagName(field));
+fn getField(comptime T: type, value: T, comptime name: []const u8) ?@FieldType(T, name) {
+    if (comptime std.meta.fieldIndex(T, name) == null) return null;
+    return @field(value, name);
 }
 ```
 
@@ -431,10 +430,10 @@ fn toJson(value: anytype, writer: anytype) !void {
     switch (@typeInfo(T)) {
         .@"struct" => |info| {
             try writer.writeAll("{");
-            inline for (info.fields, 0..) |field, i| {
+            inline for (info.field_names, 0..) |name, i| {
                 if (i > 0) try writer.writeAll(",");
-                try writer.print("\"{s}\":", .{field.name});
-                try toJson(@field(value, field.name), writer);
+                try writer.print("\"{s}\":", .{name});
+                try toJson(@field(value, name), writer);
             }
             try writer.writeAll("}");
         },

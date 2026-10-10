@@ -27,7 +27,7 @@ const PthreadMutex = struct {
     pub fn lock(m: *@This()) void { _ = std.c.pthread_mutex_lock(&m.inner); }
     pub fn unlock(m: *@This()) void { _ = std.c.pthread_mutex_unlock(&m.inner); }
     pub fn tryLock(m: *@This()) bool {
-        return @intFromEnum(std.c.pthread_mutex_trylock(&m.inner)) == 0;
+        return @backingInt(std.c.pthread_mutex_trylock(&m.inner)) == 0;
     }
 };
 
@@ -45,7 +45,7 @@ const PthreadCondition = struct {
             .nsec = @intCast((now_ns + timeout_ns) % 1_000_000_000),
         };
         const rc = std.c.pthread_cond_timedwait(&cond.inner, &mutex.inner, &deadline);
-        if (@intFromEnum(rc) == @intFromEnum(std.c.E.TIMEDOUT)) return error.Timeout;
+        if (@backingInt(rc) == @backingInt(std.c.E.TIMEDOUT)) return error.Timeout;
     }
 };
 

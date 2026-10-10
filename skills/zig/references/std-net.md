@@ -41,7 +41,7 @@ All networking in 0.16 requires an `Io` instance. There is no bare `std.Io.init(
 const std = @import("std");
 
 pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    var gpa: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
     defer _ = gpa.deinit();
 
     var threaded: std.Io.Threaded = .init(gpa.allocator(), .{});
@@ -102,7 +102,7 @@ defer conn.stream.close();
 const std = @import("std");
 
 pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    var gpa: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
     defer _ = gpa.deinit();
     var threaded: std.Io.Threaded = .init(gpa.allocator(), .{});
     defer threaded.deinit();
@@ -270,7 +270,7 @@ const std = @import("std");
 const net = std.net;  // OLD (0.15.x) — std.net removed in 0.16, see 0.16 Migration above
 
 pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    var gpa: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -597,7 +597,7 @@ const std = @import("std");
 const net = std.net;  // OLD (0.15.x) — std.net removed in 0.16, see 0.16 Migration above
 
 pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    var gpa: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

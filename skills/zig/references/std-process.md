@@ -86,9 +86,9 @@ const term = try child.wait(io);
 
 switch (term) {
     .exited => |code| std.debug.print("Exited with {d}\n", .{code}),
-    // .signal / .stopped carry a std.posix.SIG enum — get the number via @intFromEnum
-    .signal => |sig| std.debug.print("Killed by signal {d}\n", .{@intFromEnum(sig)}),
-    .stopped => |sig| std.debug.print("Stopped by signal {d}\n", .{@intFromEnum(sig)}),
+    // .signal / .stopped carry a std.posix.SIG enum — get the number via @backingInt
+    .signal => |sig| std.debug.print("Killed by signal {d}\n", .{@backingInt(sig)}),
+    .stopped => |sig| std.debug.print("Stopped by signal {d}\n", .{@backingInt(sig)}),
     .unknown => |status| std.debug.print("Unknown status {d}\n", .{status}),
 }
 ```
@@ -443,7 +443,7 @@ CWD access now takes an `Io`. `getCwd` / `getCwdAlloc` were renamed to
 
 ```zig
 // Into a provided buffer; returns the number of bytes written.
-var buf: [std.fs.max_path_bytes]u8 = undefined;
+var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
 const n = try std.process.currentPath(io, &buf);
 const cwd = buf[0..n];
 _ = cwd;
@@ -485,8 +485,8 @@ std.process.fatal("bad config value: {d}", .{code});
 ### Replace Current Process
 
 `execv` / `execve` were replaced by `replace` (resolves `argv[0]` via `PATH`) and
-`replacePath` (treats `argv[0]` as a path relative to a directory). Both take an
-`Io`. On success they never return; they only return on failure, and the return
+the `.exe` option of `ReplaceOptions` (`.exe = .{ .path = dir }` treats `argv[0]` as a
+path relative to a directory; `replacePath` was removed). It takes an `Io`. On success it never returns; it only returns on failure, and the return
 value **is** the error (the return type is `ReplaceError`, an error set), so there
 is no `try`:
 
@@ -505,7 +505,8 @@ try env.put("PATH", "/bin");
 
 var dir = try std.Io.Dir.cwd().openDir(io, "/bin", .{});
 defer dir.close(io);
-return std.process.replacePath(io, dir, .{
+return std.process.replace(io, .{
+    .exe = .{ .path = dir },
     .argv = &.{ "echo", "hi" },
     .environ_map = &env,
 });
@@ -547,7 +548,7 @@ const exe = try std.process.executablePathAlloc(io, gpa);
 defer gpa.free(exe);
 
 // Into a buffer; returns the number of bytes written.
-var buf: [std.fs.max_path_bytes]u8 = undefined;
+var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
 const n = try std.process.executablePath(io, &buf);
 const path = buf[0..n];
 _ = path;
@@ -561,7 +562,7 @@ if (std.process.can_spawn) {
 }
 
 if (std.process.can_replace) {
-    // std.process.replace / replacePath are supported
+    // std.process.replace is supported
 }
 ```
 
@@ -629,13 +630,13 @@ fn getConfigPath(gpa: Allocator, environ: std.process.Environ) ![]const u8 {
     // Fall back to XDG.
     if (environ.getAlloc(gpa, "XDG_CONFIG_HOME")) |xdg| {
         defer gpa.free(xdg);
-        return std.fs.path.join(gpa, &.{ xdg, "myapp", "config.json" });
+        return std.Io.Dir.path.join(gpa, &.{ xdg, "myapp", "config.json" });
     } else |_| {}
 
     // Fall back to HOME.
     const home = try environ.getAlloc(gpa, "HOME");
     defer gpa.free(home);
-    return std.fs.path.join(gpa, &.{ home, ".config", "myapp", "config.json" });
+    return std.Io.Dir.path.join(gpa, &.{ home, ".config", "myapp", "config.json" });
 }
 ```
 

@@ -151,7 +151,7 @@ fn taskCompare(_: void, a: Task, b: Task) std.math.Order {
 const TaskQueue = std.PriorityQueue(Task, void, taskCompare);
 
 pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    var gpa: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

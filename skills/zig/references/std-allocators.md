@@ -12,11 +12,11 @@ Zig has no default allocator. Functions that need heap memory accept an `Allocat
 | `std.heap.page_allocator` | Backing for other allocators | Yes |
 | `std.heap.c_allocator` | Linking libc, interop | Yes |
 | `std.heap.raw_c_allocator` | Libc arena backing (no alignment overhead) | Yes |
-| `std.heap.DebugAllocator` | Debug builds, leak/corruption detection | Configurable |
+| `std.heap.SafeAllocator` | Debug/safe builds, leak/corruption detection | Configurable |
 | `std.heap.smp_allocator` | ReleaseFast production multithreaded | Yes |
 | `std.heap.MemoryPool` | High-frequency same-type allocations | No |
 | `std.heap.ThreadSafeAllocator` | Wrap non-thread-safe allocator | Yes |
-| `std.heap.StackFallbackAllocator` | Stack buffer with heap fallback | Depends |
+| `std.heap.BufferFirstAllocator` | Stack buffer with heap fallback | Depends |
 | `std.heap.wasm_allocator` | WebAssembly targets | Yes |
 
 ## Allocator Naming Conventions
@@ -150,11 +150,11 @@ slice = try allocator.realloc(slice, new_len);
 1. **Library code?** Accept `Allocator` parameter - let caller decide
 2. **Unit test?** Use `std.testing.allocator` (has leak detection)
 3. **Size known at comptime?** Use `FixedBufferAllocator` with stack buffer
-4. **Stack with heap fallback?** Use `stackFallback(N, backing_allocator)`
+4. **Stack with heap fallback?** Use `BufferFirstAllocator` (stack buffer + backing allocator)
 5. **CLI app / one-shot?** Use `ArenaAllocator` wrapping `page_allocator`
 6. **Request loop (web/game)?** Use `ArenaAllocator`, reset per iteration
 7. **Many same-type objects?** Use `MemoryPool(T)` for fast create/destroy
-8. **Debug build?** Use `DebugAllocator` for leak/corruption detection
+8. **Debug build?** Use `SafeAllocator` for leak/corruption detection
 9. **ReleaseFast production?** Use `std.heap.smp_allocator`
 10. **Linking libc?** Use `c_allocator` or `raw_c_allocator` (as arena backing)
 
@@ -246,32 +246,28 @@ var arena = state.promote(std.heap.page_allocator);
 defer arena.deinit();
 ```
 
-### DebugAllocator
+### SafeAllocator (was DebugAllocator before 0.17)
 
 Detects leaks, double-free, use-after-free. Designed for safety over performance, but still faster than `page_allocator`. Safety checks and thread safety configurable:
 
 ```zig
-var gpa: std.heap.DebugAllocator(.{}) = .init;
+var safe: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
 defer {
-    const check = gpa.deinit();
-    if (check == .leak) {
+    // deinit() returns the number of leaks (usize), not .ok/.leak
+    if (safe.deinit() != 0) {
         std.debug.print("Memory leak detected!\n", .{});
     }
 }
-const allocator = gpa.allocator();
+const allocator = safe.allocator();
 ```
 
 **Configuration options:**
 
 ```zig
-var gpa: std.heap.DebugAllocator(.{
-    .stack_trace_frames = 10,     // Capture more frames
-    .enable_memory_limit = true,  // Track total bytes
-    .safety = true,               // Enable safety checks
-    .thread_safe = true,          // Multi-thread support
-    .never_unmap = true,          // Debug use-after-free
-    .retain_metadata = true,      // Better double-free detection
-}) = .init;
+var safe: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{
+    .stack_trace_frames = 10,       // Capture more frames
+    .check_write_after_free = true, // Detect writes to freed memory
+});
 ```
 
 ### SmpAllocator
@@ -294,7 +290,7 @@ const allocator = std.heap.c_allocator;
 
 ### Page Allocator
 
-Requests entire pages from OS via syscall. A 1-byte allocation reserves multiple kibibytes - inefficient for small allocations. Use as backing allocator for `ArenaAllocator` or `DebugAllocator`:
+Requests entire pages from OS via syscall. A 1-byte allocation reserves multiple kibibytes - inefficient for small allocations. Use as backing allocator for `ArenaAllocator` or `SafeAllocator`:
 
 ```zig
 const allocator = std.heap.page_allocator;
@@ -305,33 +301,34 @@ const allocator = std.heap.page_allocator;
 Fast allocator for many objects of the same type. Outperforms general-purpose allocators when allocating/freeing objects in rapid succession:
 
 ```zig
-var pool = std.heap.MemoryPool(MyStruct).init(std.heap.page_allocator);
-defer pool.deinit();
+const gpa = std.heap.page_allocator;
+var pool: std.heap.MemoryPool(MyStruct) = .empty;
+defer pool.deinit(gpa);
 
-// Allocate objects (very fast)
-const obj1 = try pool.create();
-const obj2 = try pool.create();
+// Allocate objects (very fast); the allocator is passed to every call that may allocate
+const obj1 = try pool.create(gpa);
+const obj2 = try pool.create(gpa);
 
 // Free returns to pool for reuse (not to backing allocator)
 pool.destroy(obj1);
 
 // Reuses freed slot
-const obj3 = try pool.create();  // likely same address as obj1
+const obj3 = try pool.create(gpa);  // likely same address as obj1
 
 // Reset all - batch destroy without individual frees
-_ = pool.reset(.retain_capacity);
+_ = pool.reset(gpa, .retain_capacity);
 ```
 
 **Options:**
 ```zig
 // Pre-allocate slots
-var pool = try std.heap.MemoryPool(T).initPreheated(allocator, 100);
+var pool = try std.heap.MemoryPool(T).initCapacity(allocator, 100);
 
 // Custom alignment
-var pool = std.heap.MemoryPoolAligned(T, .@"64").init(allocator);
+var aligned_pool: std.heap.memory_pool.Aligned(T, .@"64") = .empty;
 
-// Non-growable (fixed capacity)
-var pool = try std.heap.MemoryPoolExtra(T, .{ .growable = false }).initPreheated(allocator, 50);
+// Non-growable (fixed capacity; the allocator passed to create() may be undefined)
+var fixed_pool = try std.heap.memory_pool.Extra(T, .{ .growable = false }).initCapacity(allocator, 50);
 ```
 
 ### ThreadSafeAllocator → SmpAllocator (0.16)
@@ -344,13 +341,14 @@ const allocator = std.heap.smp_allocator;  // singleton, ready to use from multi
 
 If you specifically need to make an *arbitrary* existing allocator thread-safe (not `smp_allocator` itself), you now have to write that mutex wrapper yourself (a single `Allocator.VTable` wrapping `std.Io.Mutex`/a pthread shim); there is no longer a std type for it.
 
-### StackFallbackAllocator
+### BufferFirstAllocator (was StackFallbackAllocator before 0.17)
 
 Allocates from stack buffer first, falls back to another allocator when exhausted:
 
 ```zig
-var fallback = std.heap.stackFallback(4096, std.heap.page_allocator);
-const allocator = fallback.get();
+var buf: [4096]u8 = undefined;
+var fallback: std.heap.BufferFirstAllocator = .init(&buf, std.heap.page_allocator);
+const allocator = fallback.allocator();
 
 // First 4KB comes from stack (no heap allocation)
 const small = try allocator.alloc(u8, 100);
@@ -432,11 +430,11 @@ defer allocator.free(content);
 ### Wrapping Allocators (Sub-Allocators)
 
 ```zig
-// Arena on top of debug allocator
-var gpa: std.heap.DebugAllocator(.{}) = .init;
-defer _ = gpa.deinit();
+// Arena on top of the safe (debugging) allocator
+var safe: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
+defer _ = safe.deinit();
 
-var arena = std.heap.ArenaAllocator.init(gpa.allocator());
+var arena = std.heap.ArenaAllocator.init(safe.allocator());
 defer arena.deinit();
 
 const allocator = arena.allocator();
@@ -494,11 +492,11 @@ fn process(allocator: Allocator) void {
 Use `.init` not `.{}`:
 
 ```zig
-// WRONG - deprecated
-var gpa: std.heap.DebugAllocator(.{}) = .{};
+// WRONG (0.17): DebugAllocator was replaced by SafeAllocator
+var gpa: std.heap.DebugAllocator(.{}) = .init;
 
 // CORRECT
-var gpa: std.heap.DebugAllocator(.{}) = .init;
+var safe: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
 ```
 
 ## Debugging Memory Issues
@@ -515,16 +513,15 @@ test "check for leaks" {
 }
 ```
 
-### DebugAllocator in Main
+### SafeAllocator in Main
 
 ```zig
 pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    var safe: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
     defer {
-        const check = gpa.deinit();
-        if (check == .leak) @panic("memory leak");
+        if (safe.deinit() != 0) @panic("memory leak");
     }
-    try run(gpa.allocator());
+    try run(safe.allocator());
 }
 ```
 

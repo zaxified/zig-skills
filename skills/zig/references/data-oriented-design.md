@@ -52,7 +52,7 @@ const MonsterId = enum(u32) { _ };          // non-exhaustive enum as opaque han
 const NodeIndex = enum(u32) { none = std.math.maxInt(u32), _ };
 
 fn get(list: *const MonsterList, id: MonsterId) *Monster {
-    return &list.items[@intFromEnum(id)];
+    return &list.items[@backingInt(id)];
 }
 ```
 Search "handles are the better pointers" (Andre Weissflug / Floooh) for the full pattern.

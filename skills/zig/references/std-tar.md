@@ -17,8 +17,8 @@ std.tar.Iterator    // Iterate over entries in tar archive
 std.tar.Writer      // Create tar archives
 std.tar.Diagnostics // Collect errors during extraction
 std.tar.FileKind    // .file, .directory, .sym_link
-std.tar.PipeOptions // Options for pipeToFileSystem
-std.tar.pipeToFileSystem()  // Extract archive to directory
+std.tar.ExtractOptions // Options for extract (was PipeOptions)
+std.tar.extract()  // Extract archive to directory (was pipeToFileSystem before 0.17)
 ```
 
 ## Reading Tar Archives
@@ -32,8 +32,8 @@ const data = @embedFile("archive.tar");
 var reader: std.Io.Reader = .fixed(data);
 
 // Buffers must be provided by caller
-var file_name_buffer: [std.fs.max_path_bytes]u8 = undefined;
-var link_name_buffer: [std.fs.max_path_bytes]u8 = undefined;
+var file_name_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+var link_name_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
 
 var it: std.tar.Iterator = .init(&reader, .{
     .file_name_buffer = &file_name_buffer,
@@ -100,7 +100,7 @@ pub const Options = struct {
 
 ## Extracting to Filesystem
 
-### pipeToFileSystem
+### extract
 
 Extract entire archive to a directory:
 
@@ -108,7 +108,7 @@ Extract entire archive to a directory:
 const data = @embedFile("archive.tar");
 var reader: std.Io.Reader = .fixed(data);
 
-try std.tar.pipeToFileSystem(std.Io.Dir.cwd(), &reader, .{
+try std.tar.extract(io, std.Io.Dir.cwd(), &reader, .{
     .strip_components = 1,        // remove leading path component
     .mode_mode = .executable_bit_only,
     .exclude_empty_directories = false,
@@ -124,13 +124,13 @@ defer file.close(io);
 var buf: [4096]u8 = undefined;
 var file_reader = file.reader(io, &buf);
 
-try std.tar.pipeToFileSystem(output_dir, &file_reader.interface, .{});
+try std.tar.extract(io, output_dir, &file_reader.interface, .{});
 ```
 
-### PipeOptions
+### ExtractOptions
 
 ```zig
-pub const PipeOptions = struct {
+pub const ExtractOptions = struct {
     strip_components: u32 = 0,  // directories to strip from paths
     mode_mode: ModeMode = .executable_bit_only,
     exclude_empty_directories: bool = false,
@@ -252,7 +252,7 @@ Collect errors instead of failing immediately:
 var diagnostics: std.tar.Diagnostics = .{ .allocator = allocator };
 defer diagnostics.deinit();
 
-std.tar.pipeToFileSystem(dir, &reader, .{
+std.tar.extract(io, dir, &reader, .{
     .diagnostics = &diagnostics,
 }) catch |err| {
     // Some errors are still fatal
@@ -309,13 +309,13 @@ pub const Error = union(enum) {
 ### Extract and Process Archive
 
 ```zig
-fn extractTar(allocator: Allocator, tar_data: []const u8, dest: std.Io.Dir) !void {
+fn extractTar(io: std.Io, allocator: Allocator, tar_data: []const u8, dest: std.Io.Dir) !void {
     var reader: std.Io.Reader = .fixed(tar_data);
 
     var diagnostics: std.tar.Diagnostics = .{ .allocator = allocator };
     defer diagnostics.deinit();
 
-    try std.tar.pipeToFileSystem(dest, &reader, .{
+    try std.tar.extract(io, dest, &reader, .{
         .strip_components = 1,
         .diagnostics = &diagnostics,
     });
@@ -335,8 +335,8 @@ fn listTar(allocator: Allocator, tar_data: []const u8) !void {
     _ = allocator;
     var reader: std.Io.Reader = .fixed(tar_data);
 
-    var file_name_buffer: [std.fs.max_path_bytes]u8 = undefined;
-    var link_name_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    var file_name_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    var link_name_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
 
     var it: std.tar.Iterator = .init(&reader, .{
         .file_name_buffer = &file_name_buffer,
@@ -386,7 +386,7 @@ fn createTarFromDir(io: std.Io, allocator: Allocator, source_dir: std.Io.Dir, ro
                 try w.writeFile(entry.path, &file_reader, mtime_secs);
             },
             .sym_link => {
-                var link_buf: [std.fs.max_path_bytes]u8 = undefined;
+                var link_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
                 const len = try entry.dir.readLink(io, entry.basename, &link_buf);
                 try w.writeLink(entry.path, link_buf[0..len], .{});
             },
@@ -404,8 +404,8 @@ fn createTarFromDir(io: std.Io, allocator: Allocator, source_dir: std.Io.Dir, ro
 fn extractFile(tar_data: []const u8, target_name: []const u8, allocator: Allocator) !?[]u8 {
     var reader: std.Io.Reader = .fixed(tar_data);
 
-    var file_name_buffer: [std.fs.max_path_bytes]u8 = undefined;
-    var link_name_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    var file_name_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    var link_name_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
 
     var it: std.tar.Iterator = .init(&reader, .{
         .file_name_buffer = &file_name_buffer,

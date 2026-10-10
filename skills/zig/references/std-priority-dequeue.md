@@ -122,7 +122,7 @@ fn order(_: void, a: i32, b: i32) std.math.Order {
 const RangePDQ = std.PriorityDequeue(i32, void, order);
 
 pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    var gpa: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

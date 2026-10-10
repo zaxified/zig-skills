@@ -107,12 +107,18 @@ class Deprecated(unittest.TestCase):
         bad = ["const z = [_]u8{0} ** 16;", 'const s = "ab" ** 3;', "errdefer |err| log(err);",
                "const v = void{};", "const x: i0 = 0;", "const c = @cImport(@cInclude(\"a.h\"));",
                "const n = @intFromEnum(e);", 'inline for (@typeInfo(T).@"struct".fields) |f| {}',
-               ".linkage = .internal,", "if (b.args) |args| run.addArgs(args);"]
+               ".linkage = .internal,", "if (b.args) |args| run.addArgs(args);",
+               'for (@typeInfo(E).@"enum".fields) |f| {}', 'inline for (@typeInfo(T).@"struct".decls) |d| {}',
+               "if (info.is_exhaustive) {}", 'const ps = @typeInfo(F).@"fn".params;',
+               "if (@typeInfo(P).pointer.is_const) {}",
+               "const T = @Type(.{ .int = .{ .signedness = .unsigned, .bits = 3 } });"]
         for code in bad:
             self.assertIsNotNone(self.hit(code), code)
         good = ["const z: [16]u8 = @splat(0);", "const p = a ** b;", "errdefer gpa.free(x);",
                 "const n = @backingInt(e);", 'inline for (info.field_names) |n| {}', "const u: u0 = 0;",
-                "run.addPassthruArgs();", ".linkage = .strong,"]
+                "run.addPassthruArgs();", ".linkage = .strong,",
+                'for (@typeInfo(E).@"enum".field_names) |n| {}', "if (info.mode == .exhaustive) {}",
+                'const c = @typeInfo(P).pointer.attrs.@"const";', "const a = std.mem.Alignment.of(T);"]
         for code in good:
             self.assertIsNone(self.hit(code), code)
 

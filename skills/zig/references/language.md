@@ -63,7 +63,7 @@ const z: u32 = @bitCast(float_val);  // reinterpret bits
 // Fixed-size arrays
 const arr: [5]u8 = .{ 1, 2, 3, 4, 5 };
 const arr2 = [_]u8{ 1, 2, 3 };         // infer length
-const zeros = [_]u8{0} ** 100;         // repeat pattern
+const zeros: [100]u8 = @splat(0);      // repeat value
 
 // Sentinel-terminated arrays
 const str: [5:0]u8 = "hello".*;        // null-terminated
@@ -251,11 +251,12 @@ fn example() !void {
     return ptr;  // errdefer does NOT run
 }
 
-// errdefer with capture
-fn example() !void {
-    errdefer |err| {
-        log.err("Failed with: {}", .{err});
-    };
+// WRONG (0.17): errdefer |err| { log.err("Failed with: {t}", .{err}); } — capture removed
+// CORRECT: to act on the error, catch it in a wrapper
+fn example() void {
+    exampleInner() catch |err| log.err("Failed with: {t}", .{err});
+}
+fn exampleInner() !void {
     try riskyOperation();
 }
 ```
@@ -468,8 +469,8 @@ const HttpStatus = enum(u16) {
     _,  // non-exhaustive marker
 };
 
-const code: u16 = @intFromEnum(HttpStatus.ok);  // 200
-const status: HttpStatus = @enumFromInt(404);    // .not_found
+const code: u16 = @backingInt(HttpStatus.ok);  // 200
+const status: HttpStatus = @fromBackingInt(404);  // .not_found
 ```
 
 ### Enum Methods
@@ -602,7 +603,7 @@ comptime {
 
 // Comptime parameter
 fn repeat(comptime n: usize, value: u8) [n]u8 {
-    return [_]u8{value} ** n;
+    return @splat(value);
 }
 ```
 
@@ -641,9 +642,9 @@ fn fieldNames(comptime T: type) []const []const u8 {
     const info = @typeInfo(T);
     if (info != .@"struct") @compileError("expected struct");
 
-    var names: [info.@"struct".fields.len][]const u8 = undefined;
-    for (info.@"struct".fields, 0..) |field, i| {
-        names[i] = field.name;
+    var names: [info.@"struct".field_names.len][]const u8 = undefined;
+    for (info.@"struct".field_names, 0..) |name, i| {
+        names[i] = name;
     }
     return &names;
 }
@@ -657,8 +658,8 @@ inline for (0..4) |i| {
 }
 
 // Generate code for each field
-inline for (std.meta.fields(T)) |field| {
-    @field(value, field.name) = default;
+inline for (@typeInfo(T).@"struct".field_names) |name| {
+    @field(value, name) = default;
 }
 ```
 

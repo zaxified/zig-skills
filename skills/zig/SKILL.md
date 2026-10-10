@@ -1,6 +1,6 @@
 ---
 name: zig-0.17
-description: "Up-to-date Zig 0.16.0 patterns, checked against the released standard library. Use when writing, reviewing, or debugging Zig code, build.zig and build.zig.zon files, or comptime metaprogramming. Prevents outdated patterns from training data: the std.Io instance threaded through files, sockets, clocks and locks (std.fs to std.Io.Dir/File, std.net to std.Io.net, std.time timestamps and Timer to std.Io.Clock, std.Thread.Mutex/Condition/Pool to std.Io.Mutex/Condition/Group, std.crypto.random to io.randomSecure), main(init: std.process.Init), build system APIs (root_module, Compile methods to Module methods), buffered Reader/Writer with flush, container initialization (.empty/.init), unmanaged ArrayList and HashMap, DebugAllocator, lowercase @typeInfo fields, removed async/await and usingnamespace; plus gotchas found in production code."
+description: "Zig 0.17.0 patterns, checked against the released standard library. Use when writing, reviewing, or debugging Zig code for Zig 0.17.x (zig version / minimum_zig_version in build.zig.zon; a 0.16 project uses the zig skill instead), build.zig and build.zig.zon files, or comptime metaprogramming. Covers the 0.17 changes: array ** removed (@splat), errdefer capture and @cImport removed (translate-c package), @intFromEnum to @backingInt, struct-of-arrays @typeInfo (field_names, field_types), @bitCast on extern structs, @hasDecl pub-only, std.builtin to std.lang with .debug/.safe/.fast/.small, SafeAllocator and BufferFirstAllocator, Allocator.print and mem.print, mem.find, zon.parse with an arena, HostName.fromUri, b.args to addPassthruArgs, the configurer/maker build split and zig-pkg/. Also prevents older patterns from training data: the std.Io instance threaded through files, sockets, clocks and locks (std.fs to std.Io.Dir/File, std.net to std.Io.net, std.time timestamps and Timer to std.Io.Clock, std.Thread.Mutex/Condition/Pool to std.Io.Mutex/Condition/Group, std.crypto.random to io.randomSecure), main(init: std.process.Init), build system APIs (root_module, Compile methods to Module methods), buffered Reader/Writer with flush, container initialization (.empty/.init), unmanaged ArrayList and HashMap, lowercase @typeInfo tags, removed async/await and usingnamespace; plus gotchas found in production code."
 license: MIT
 compatibility:
   - claude-code
@@ -12,11 +12,11 @@ metadata:
   category: "programming-language"
 ---
 
-# Zig Language Reference (v0.16.0)
+# Zig Language Reference (v0.17.0)
 
 Zig evolves rapidly. Training data contains outdated patterns that cause compilation errors. This skill documents breaking changes and correct modern patterns.
 
-**Version coverage:** 0.16.0 (current) with migration notes from 0.15.x and 0.14.x.
+**Version coverage:** 0.17.0 (current) with migration notes from 0.16, 0.15.x and 0.14.x.
 
 ## Design Principles
 
@@ -43,6 +43,132 @@ Larger cohesive files are idiomatic in Zig. Keep related code together — tests
 - Name allocators by contract: `gpa` (caller must free), `arena` (bulk-free at boundary), `scratch` (never escapes)
 - Prefer `const` over `var` — immutability signals intent and enables optimizations
 - Prefer slices over raw pointers — bounds safety
+
+## Critical: Zig 0.17.0 Changes
+
+Everything below the 0.17 sections still describes 0.17.0 unless it is marked as old. Check
+the project's toolchain first (`zig version`, `minimum_zig_version` in `build.zig.zon`): a
+0.16 project needs the 0.16 skill, not these spellings.
+
+### Removed syntax and builtins
+```zig
+// WRONG (0.17) — array repetition `**` is removed (parse error)
+var buf = [_]u8{0} ** 64;
+// CORRECT
+var buf: [64]u8 = @splat(0);
+
+// WRONG (0.17) — errdefer capture is removed
+errdefer |err| log.err("failed: {t}", .{err});
+// CORRECT — catch in a wrapper
+fn run(job: Job) void {
+    runInner(job) catch |err| log.err("failed: {t}", .{err});
+}
+
+// WRONG (0.17) — void{} and i0 are removed
+const v = void{};
+// CORRECT
+const v = {};       // i0 → u0
+```
+
+`@cImport` is removed: translate C headers with the `translate-c` package
+(`zig fetch --save git+https://codeberg.org/ziglang/translate-c`, then
+`@import("translate_c").Translator` in `build.zig`; `b.addTranslateC` is deprecated).
+`GlobalLinkage` lost `.internal` and `.link_once` (use `.weak`, or simply do not `@export`).
+
+### Enum ↔ integer: `@backingInt` / `@fromBackingInt`
+```zig
+const Color = enum(u8) { red, green };
+// WRONG (0.17) — deprecated (zig fmt rewrites them)
+const n = @intFromEnum(c);
+// CORRECT
+const n = @backingInt(c);                        // also works on packed structs/unions
+const c: Color = @fromBackingInt(@intCast(i));   // argument must be exactly the backing type
+```
+New: `@divCeil(a, b)` (rounds toward +inf) replaces `std.math.divCeil(...) catch unreachable`.
+
+### `@typeInfo` is struct-of-arrays
+```zig
+// WRONG (0.17) — no .fields / .decls arrays of structs
+inline for (@typeInfo(T).@"struct".fields) |f| use(f.name, f.type);
+
+// CORRECT
+const info = @typeInfo(T).@"struct";
+inline for (info.field_names, info.field_types, 0..) |name, FieldT, i| {
+    const attrs = info.field_attrs[i];   // .@"comptime", .@"align", .default_value_ptr
+    use(name, FieldT, attrs);
+}
+```
+The same shape everywhere: enum `field_names`/`field_values`/`mode` (was `is_exhaustive`),
+fn `param_types`/`param_attrs`/`attrs.@"callconv"`/`attrs.varargs`, pointer
+`attrs.@"const"`/`@"align"`/`@"volatile"`/`@"allowzero"`/`@"addrspace"`, `decl_names` instead
+of `decls`, `error_set.error_names`. `std.meta.fields` is a compile error; `fieldNames`,
+`fieldInfo`, `fieldTypes` are deprecated. `@Type` is gone (since 0.16): build types with `@Int`,
+`@Struct`, `@Union`, `@Enum`, `@Pointer`, `@Fn`, `@Tuple`.
+
+### Silent changes (compile, behave differently)
+- **`@bitCast` reinterprets logical bits.** Arrays and vectors now behave as little-endian on
+  every target. A cast of an `extern struct`/`extern union` is a **compile error** — for type
+  punning use `@ptrCast` (`const p: *align(1) const u16 = @ptrCast(&bytes);`) or an extern union.
+- **`@hasDecl` sees only `pub` declarations**, also from inside the same file.
+- **`std.mem.containsAtLeastScalar(T, list, element, minimum)`** — `element` and `minimum`
+  swapped places; old calls with an integer element still compile.
+- **`std.testing.allocator` is a `SafeAllocator`**: it never reuses memory, reports leaks in
+  every optimize mode (a leaking test now fails in ReleaseFast too), and test RSS grows with
+  allocation volume.
+
+### Renamed std
+| 0.16 | 0.17.0 |
+|---|---|
+| `std.builtin` | `std.lang` (`std.builtin` is a deprecated alias) |
+| `std.builtin.OptimizeMode` `.Debug/.ReleaseSafe/.ReleaseFast/.ReleaseSmall` | `std.lang.Optimize` `.debug/.safe/.fast/.small` — `==` against the old names no longer compiles |
+| `std.debug.runtime_safety` | `@import("builtin").mode.runtimeSafety()` |
+| `@import("builtin").cpu` / `.os` / `.abi` / `.object_format` | `@import("builtin").target.cpu` / `.os` / `.abi` / `.ofmt` |
+| `std.heap.DebugAllocator`, `GeneralPurposeAllocator` | `std.heap.SafeAllocator` (`.init(backing, .{})`, `deinit()` returns the leak count) |
+| `std.heap.stackFallback(n, gpa)` | `std.heap.BufferFirstAllocator.init(&buf, gpa)` |
+| `std.fmt.allocPrint(a, f, args)` | `a.print(f, args)` |
+| `std.fmt.bufPrint(buf, f, args)` | `std.mem.print(buf, f, args)` |
+| `std.mem.indexOf*`, `lastIndexOf*` | `std.mem.find*`, `findLast`, `findScalarLast` |
+| `std.fs.path`, `std.fs.max_path_bytes` | `std.Io.Dir.path`, `std.Io.Dir.max_path_bytes` |
+| `list.getLast()` / `getLastOrNull()` | `list.last().?` / `list.last()`; new `lastPtr()` |
+| `std.bit_set.IntegerBitSet`/`ArrayBitSet`/`StaticBitSet`/`DynamicBitSetUnmanaged` | `Integer`/`Array`/`Static`/`Dynamic`; `.initEmpty()`/`.initFull()` → `.empty`/`.full` |
+| `std.ArrayListUnmanaged`, `std.AutoArrayHashMapUnmanaged` | `std.ArrayList`, `std.array_hash_map.Auto` |
+| `std.zon.parse.fromSliceAlloc(T, gpa, src, &diag, .{})` + `free` | `std.zon.parse.fromSlice(T, .{ .gpa, .arena, .source, .diagnostics })` — result lives in the arena |
+| `uri.getHost(&buf)` | `std.Io.net.HostName.fromUri(uri, &buf)` (validates RFC 1123) |
+| `std.tar.pipeToFileSystem` | `std.tar.extract` |
+| `std.gpu` | `std.spirv` |
+
+`std.ArrayList` gained a `pointer_stability` field (a debug lock behind `lockPointers()` /
+`unlockPointers()`): a hand-written literal `.{ .items = &.{}, .capacity = 0 }` no longer
+compiles — use `.empty` or `.initBuffer(&buf)`.
+
+### Build system
+```zig
+// WRONG (0.17) — build scripts no longer see CLI args
+if (b.args) |args| run_cmd.addArgs(args);
+// CORRECT
+run_cmd.addPassthruArgs();   // forwards `zig build run -- a b c`
+```
+- `zig build` runs `build.zig` in a separate *configurer* process; a cached *maker* executes the
+  graph. The first `zig build` after installing Zig compiles the maker (about two minutes);
+  later runs skip `build.zig` entirely when the configuration is unchanged.
+- `b.build_root` → `b.root` (a `Cache.Path`); `LazyPath.getDisplayName()` → `"{f}"`.
+- Run step args: `addOutputFileArg(name)` → `addOutputFileArg2(name, .{})`, and the same `*Arg2(…,
+  .{ .prefix = … })` scheme for artifact, file, directory, output-directory and dep-file args.
+- Fmt step `paths`/`exclude_paths` take `b.pathList(&.{ "src", "build.zig" })`.
+- Option paths: `addOptionPath` (file), `addOptionPathDirectory`, `addOptionPathUntracked`.
+- `b.dependencyLazy(name, args)` returns `error.LazyDependencyNeeded`, so `try` works
+  (`lazyDependency` returning `null` is deprecated).
+- `b.findProgram` poisons the configure cache (configuration is re-run every time); prefer
+  `b.findProgramLazy` (a `LazyPath`, searched only when a step needs it). Declare what
+  configuration reads with `b.dependOnFileContents` / `dependOnDirectoryContents`.
+- Fetched packages land in `zig-pkg/` in the project (add it to `.gitignore`); `--pkg-path` /
+  `ZIG_LOCAL_PKG_DIR` move it; `zig build --fork=<path>` overrides a dependency for one build.
+- Overriding the build runner is gone (`--build-runner`); IDEs use `zig build --listen=-`
+  (Build Server Protocol). **ZLS does not work with 0.17.0** — expect no editor diagnostics.
+
+### Incremental compilation
+`zig build -fincremental --watch` works for most x86_64-linux projects in 0.17.0 (new ELF
+linker). Without `--watch` there is no incremental mode yet.
 
 ## Critical: Removed Features (0.15.x)
 
@@ -219,7 +345,7 @@ const PthreadMutex = struct {
     pub fn lock(m: *@This()) void { _ = std.c.pthread_mutex_lock(&m.inner); }
     pub fn unlock(m: *@This()) void { _ = std.c.pthread_mutex_unlock(&m.inner); }
     pub fn tryLock(m: *@This()) bool {
-        return @intFromEnum(std.c.pthread_mutex_trylock(&m.inner)) == 0;
+        return @backingInt(std.c.pthread_mutex_trylock(&m.inner)) == 0;
     }
 };
 
@@ -354,9 +480,9 @@ var stream = std.io.fixedBufferStream(&buf);
 try std.fmt.format(stream.writer(), "{d}", .{value});
 const result = stream.getWritten();
 
-// CORRECT — use std.fmt.bufPrint directly
+// CORRECT — format straight into the buffer (0.17: std.mem.print; std.fmt.bufPrint is deprecated)
 var buf: [512]u8 = undefined;
-const result = try std.fmt.bufPrint(&buf, "{d}", .{value});
+const result = try std.mem.print(&buf, "{d}", .{value});
 ```
 
 ### Vtable Writer Type Changed (0.16)
@@ -449,30 +575,23 @@ See **[std.Build reference](references/std-build.md)** for complete build system
 ```zig
 // WRONG - deprecated
 var list: std.ArrayList(u32) = .{};
-var gpa: std.heap.DebugAllocator(.{}) = .{};
 
 // CORRECT - use .empty for empty collections
 var list: std.ArrayList(u32) = .empty;
 var map: std.AutoHashMapUnmanaged(u32, u32) = .empty;
 
-// CORRECT - use .init for stateful types with internal config
-var gpa: std.heap.DebugAllocator(.{}) = .init;
-var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+// CORRECT - use .init for stateful types
+var safe: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{}); // 0.17; was DebugAllocator
+var arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
 ```
 
 ### ArrayList: Unmanaged by Default
-The old `std.ArrayList` (with allocator stored in struct) is now `std.array_list.Managed`.
-The new `std.ArrayList` is **unmanaged** — no allocator field, pass allocator to every method:
+`std.ArrayList` is **unmanaged** — no allocator field, pass the allocator to every method that
+allocates or frees. The managed variant `std.array_list.Managed` is deprecated in 0.17.
 ```zig
-// NEW default: unmanaged (no allocator field)
 var list: std.ArrayList(u32) = .empty;
+defer list.deinit(allocator);
 try list.append(allocator, 42);
-list.deinit(allocator);
-
-// If you want old behavior (allocator in struct), use Managed:
-var list = std.array_list.Managed(u32).init(allocator);
-try list.append(42);  // no allocator arg needed
-list.deinit();
 ```
 
 ### HashMap: Managed vs Unmanaged
@@ -489,19 +608,23 @@ try map.put("key", 42);
 map.deinit();
 ```
 
-### ArrayListUnmanaged Empty Init (0.16)
-In 0.16, `.{}` zero-init no longer works for `ArrayListUnmanaged` — explicit fields required:
+### ArrayList Empty Init
+Neither `.{}` nor a hand-written field literal initializes an `ArrayList`: 0.17 added a
+`pointer_stability` field without a default.
 ```zig
-// WRONG (0.16) — .{} no longer zero-inits correctly
+// WRONG — .{} (no defaults) and a field literal (0.17: missing pointer_stability)
 ._list = .{},
-
-// CORRECT — explicit fields
 ._list = .{ .items = &.{}, .capacity = 0 },
+
+// CORRECT
+._list = .empty,
 ```
 
 ### Naming Changes
 - **`std.ArrayListUnmanaged` -> `std.ArrayList`** (Unmanaged is now default, old name deprecated)
-- **`std.heap.GeneralPurposeAllocator` -> `std.heap.DebugAllocator`** (GPA alias still works)
+- **`std.heap.GeneralPurposeAllocator` / `DebugAllocator` -> `std.heap.SafeAllocator`** (0.17;
+  `DebugAllocator` is deprecated). In `main(init: std.process.Init)` use `init.gpa`, which is a
+  `SafeAllocator` in debug/safe builds and `smp_allocator`/`c_allocator` in fast/small builds.
 
 ### Linked Lists: Generic Parameter Removed
 ```zig
@@ -597,8 +720,9 @@ if (@typeInfo(T) == .int) { ... }
 if (@typeInfo(T) == .bool) { ... }
 if (@typeInfo(T) == .pointer) { ... }
 
-// Accessing fields:
-const fields = @typeInfo(T).@"struct".fields;
+// Accessing fields (0.17: struct-of-arrays, see "Zig 0.17.0 Changes"):
+const names = @typeInfo(T).@"struct".field_names;
+const types = @typeInfo(T).@"struct".field_types;
 const tag_type = @typeInfo(T).@"enum".tag_type;
 ```
 
@@ -663,9 +787,9 @@ var server = std.http.Server.init(
 | `'std.net' has no member 'Stream'` | Networking moved: use `std.Io.net.Stream` (0.16) |
 | `'std.net' has no member 'Address'` | Use `std.Io.net.IpAddress.parse(host, port)` (0.16) |
 | `no field 'addIncludePath' in 'Compile'` | Methods moved: `lib.root_module.addIncludePath(...)` (0.16) |
-| `'timestamp' not found in 'std.time'` | Removed: use `std.c.clock_gettime(.REALTIME, &ts)` (0.16) |
+| `'timestamp' not found in 'std.time'` | Removed (0.16): `std.Io.Clock.real.now(io)` (wall) / `.awake` (monotonic) |
 | `'Mutex' not found in 'std.Thread'` | Removed: use `std.Io.Mutex` (needs `Io`); no `Io`: raw futex on Linux, POSIX `PthreadMutex` shim as last resort (0.16) |
-| `'random' not found in 'std.crypto'` | Removed: use `arc4random_buf` or `std.os.linux.getrandom` (0.16) |
+| `'random' not found in 'std.crypto'` | Removed (0.16): `io.randomSecure(&buf)`; without an `Io`, `std.os.linux.getrandom` |
 | `'lockStderrWriter' not found` | Renamed: use `std.debug.lockStderr(&buf)` (0.16) |
 | `local constant shadows declaration` | 0.16 forbids local names matching module-level `extern fn` — rename local |
 | `signed integer division` | Use `@divTrunc(a, b)` not `a / b` for signed integers (0.16) |
@@ -683,6 +807,17 @@ var server = std.http.Server.init(
 | `no field named 'open'` on HTTP | Use `client.request()` or `client.fetch()` |
 | `expected error union, found Signature` | `Ed25519.Signature.fromBytes()` doesn't return error — remove `try` |
 | `addSharedLibrary` not found | Use `b.addLibrary(.{ .linkage = .dynamic, ... })` |
+| `binary operator '*' has whitespace on one side` at `} ** n` | Array `**` removed (0.17): `const a: [n]T = @splat(x);` |
+| `expected block or expression, found '\|'` after `errdefer` | errdefer capture removed (0.17): catch in a wrapper function |
+| `invalid builtin function: '@cImport'` | Removed (0.17): `translate-c` package, `Translator.init` in build.zig |
+| `no field named 'fields' in struct 'lang.Type.Struct'` | SoA type info (0.17): `field_names`, `field_types`, `field_attrs` |
+| `cannot @bitCast from '<extern struct>'` | 0.17: `@ptrCast` to `*align(1) const T`, or an extern union |
+| `no field named 'args' in struct 'Build'` | 0.17: `run_cmd.addPassthruArgs()` |
+| `no field named 'build_root' in struct 'Build'` | 0.17: `b.root` (a `Cache.Path`) |
+| `no field named 'ReleaseFast' in enum 'lang.Optimize'` | 0.17: `.debug`, `.safe`, `.fast`, `.small` |
+| `'zon.parse' has no member named 'fromSliceAlloc'` | 0.17: `std.zon.parse.fromSlice(T, .{ .gpa, .arena, .source, .diagnostics })` |
+| `missing struct field: pointer_stability` | 0.17 ArrayList: initialize with `.empty`, not a field literal |
+| `expected error union type, found '...X25519.KeyPair'` | 0.17: it no longer fails — drop the `try` |
 
 ## Verification Workflow
 
@@ -695,7 +830,8 @@ After writing or modifying Zig code, verify with this sequence:
    `undefined`)
 
 **Development speed tips:**
-- `zig build --watch -fincremental` — incremental compilation, rebuilds on file change
+- `zig build --watch -fincremental` — incremental compilation, rebuilds on file change (0.17:
+  works for most x86_64-linux projects)
 - Debug on x86_64 Linux uses the self-hosted backend: 2–6x faster to compile than LLVM, but
   its code runs 2–3x slower. Use it for the edit loop and LLVM (`-fllvm`, `.use_llvm = true`)
   for test runs — see [0.16 gotchas](references/zig-016-gotchas.md), "Two backends"
@@ -840,7 +976,11 @@ Load these references when working with specific modules:
 ### ZLS (Zig Language Server)
 IDE support via Language Server Protocol. Provides autocomplete, go-to-definition, hover docs, diagnostics.
 
-**Version matching rule:** Use ZLS release matching your Zig release (0.15.x ZLS for 0.15.x Zig). Nightly Zig needs nightly ZLS.
+**Version matching rule:** Use ZLS release matching your Zig release (0.16.x ZLS for 0.16.x Zig). Nightly Zig needs nightly ZLS.
+
+**Zig 0.17.0: ZLS does not work.** The configurer/maker split removed the build-runner hook
+ZLS used; ZLS and Zig are moving it to the Build Server Protocol. Until a ZLS release supports
+0.17, compile (`zig build`) to see errors instead of relying on editor diagnostics.
 
 **Installation:**
 ```bash
@@ -850,7 +990,7 @@ IDE support via Language Server Protocol. Provides autocomplete, go-to-definitio
 # Download from https://github.com/zigtools/zls/releases
 # Or build from source:
 git clone https://github.com/zigtools/zls
-cd zls && git checkout 0.15.0  # match your Zig version
+cd zls && git checkout 0.16.0  # match your Zig version
 zig build -Doptimize=ReleaseSafe
 
 # Configure:
@@ -877,20 +1017,20 @@ Manage multiple Zig versions side-by-side. Useful for migrating between versions
 
 **Usage:**
 ```bash
-zigup fetch 0.15.2          # download without changing default
 zigup fetch 0.16.0          # download without changing default
+zigup fetch 0.17.0          # download without changing default
 zigup list                  # show installed versions
-zigup 0.16.0                # set as default
-zigup run 0.15.2 build      # run specific version without changing default
-zigup run 0.16.0 build test # test with specific version
-zigup clean 0.15.2          # remove old version
+zigup 0.17.0                # set as default
+zigup run 0.16.0 build      # run specific version without changing default
+zigup run 0.17.0 build test # test with specific version
+zigup clean 0.16.0          # remove old version
 ```
 
 **Migration workflow:**
 ```bash
-zigup run 0.16.0 zig build 2>&1 | head -40  # try build with new version
+zigup run 0.17.0 build 2>&1 | head -40  # try build with new version
 # fix errors, re-run until clean
-zigup 0.16.0                                  # promote to default
+zigup 0.17.0                              # promote to default
 ```
 
 ### anyzig (Version Manager)
@@ -912,7 +1052,7 @@ cd myproject && zig build
 
 # Manual version override:
 zig 0.13.0 build-exe myproject.zig
-zig 0.15.2 build
+zig 0.16.0 build
 
 # Mach engine versions supported:
 # Reads .mach_zig_version from build.zig.zon
@@ -927,7 +1067,7 @@ zig any --help
 .{
     .name = .myproject,
     .version = "0.1.0",
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.17.0",
     // ...
 }
 ```

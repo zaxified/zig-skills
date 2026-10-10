@@ -112,7 +112,7 @@ fn myLogFn(
     // Filter: only errors from unknown scopes
     const scope_prefix = switch (scope) {
         .my_app, .default => @tagName(scope),
-        else => if (@intFromEnum(level) <= @intFromEnum(std.log.Level.err))
+        else => if (@backingInt(level) <= @backingInt(std.log.Level.err))
             @tagName(scope)
         else
             return,  // Skip non-error from other scopes
@@ -161,7 +161,7 @@ const level: std.log.Level = .warn;
 const text = level.asText();  // "warning"
 
 // Compare levels (lower = more severe)
-const is_error_or_worse = @intFromEnum(level) <= @intFromEnum(std.log.Level.err);
+const is_error_or_worse = @backingInt(level) <= @backingInt(std.log.Level.err);
 ```
 
 ## Default Log Function

@@ -13,8 +13,8 @@ const Color = enum { red, green, blue, yellow };
 const ColorSet = std.enums.EnumSet(Color);
 
 // Initialize
-var colors = ColorSet.initEmpty();
-var all = ColorSet.initFull();
+var colors: ColorSet = .empty;
+var all: ColorSet = .full;
 
 // Struct-style init
 var primary = ColorSet.init(.{
@@ -214,7 +214,7 @@ const arr = std.enums.directEnumArray(
     8,  // max_unused_slots (gaps allowed)
     .{ .a = true, .b = false, .c = true },
 );
-// arr is [11]bool, indexed by @intFromEnum
+// arr is [11]bool, indexed by @backingInt(tag)
 ```
 
 ## Complete Example: Permission System
@@ -244,7 +244,7 @@ fn canAccess(user: User, required: Permissions) bool {
 pub fn main() void {
     const admin = User{
         .name = "admin",
-        .perms = Permissions.initFull(),
+        .perms = Permissions.full,
     };
 
     const reader = User{
@@ -296,5 +296,5 @@ pub fn main() void {
 - `EnumMap`: Sparse, only stores present values
 - `EnumArray`: Dense, all values always present
 - All are fixed-size, zero-allocation, copyable by value
-- Use `std.StaticBitSet` for non-enum integer sets
+- Use `std.bit_set.Static` for non-enum integer sets
 - Works with non-exhaustive enums (explicit fields only)

@@ -235,7 +235,7 @@ pub fn main(init: std.process.Init) void {
     const seconds = time.getSecondsIntoMinute(); // u6 (0-59)
 
     std.debug.print("{d}-{d}-{d} {d}:{d}:{d}\n", .{
-        year_day.year, @intFromEnum(month_day.month), month_day.day_index + 1,
+        year_day.year, @backingInt(month_day.month), month_day.day_index + 1,
         hours, minutes, seconds,
     });
 }
@@ -312,7 +312,7 @@ fn formatTimestamp(secs: u64, buf: []u8) []u8 {
     const yd = day.calculateYearDay();
     const md = yd.calculateMonthDay();
 
-    return std.fmt.bufPrint(buf, "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}Z", .{
+    return std.mem.print(buf, "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}Z", .{
         yd.year,
         md.month.numeric(),
         md.day_index + 1,  // day_index is 0-based

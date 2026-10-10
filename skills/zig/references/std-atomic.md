@@ -197,7 +197,7 @@ const PaddedCounter = struct {
 
 // Per-thread counters without false sharing
 const ThreadCounters = struct {
-    counters: [MAX_THREADS]PaddedCounter = [_]PaddedCounter{.{}} ** MAX_THREADS,
+    counters: [MAX_THREADS]PaddedCounter = @splat(.{}),
 };
 ```
 
