@@ -32,8 +32,9 @@ const file = try std.Io.Dir.cwd().openFile(io, "data.txt", .{});
 // POSIX-level — 0.16: std.posix.open is gone, use openat with AT.FDCWD
 const fd = try std.posix.openat(std.posix.AT.FDCWD, "data.txt", .{}, 0);
 
-// C-level (direct libc, lowest level)
-const fd = std.c.open("data.txt", .{}, 0);
+// C-level (direct libc, lowest level) — requires linking libc (`.link_libc = true`).
+// `open` is variadic: the mode must be a typed value, not a bare comptime_int.
+const fd = std.c.open("data.txt", .{}, @as(std.c.mode_t, 0));
 ```
 
 ## Fundamental Types
@@ -931,7 +932,7 @@ extern "c" fn c_function(fd: std.c.fd_t, buf: [*]u8, len: usize) isize;
 pub fn wrapper(fd: std.posix.fd_t, buf: []u8) !usize {
     const result = c_function(fd, buf.ptr, buf.len);
     if (result < 0) {
-        const err = std.posix.errno(std.c._errno().*);
+        const err = std.c.errno(result); // E.SUCCESS unless result == -1
         return std.posix.unexpectedErrno(err);
     }
     return @intCast(result);

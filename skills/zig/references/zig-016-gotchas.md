@@ -71,6 +71,16 @@ fn toI64(f: f64) ?i64 {
 Pair the guard with a test that an in-range float still converts, or the fix can silently
 disable the feature.
 
+## std.debug
+
+### `getSymbols` with a stack-tracing allocator deadlocks
+
+Measured on 0.16.0: `std.debug.SelfInfo.getSymbols` takes the debug-info lock exclusively and
+then allocates. If the allocator records a stack trace per allocation — a `DebugAllocator`
+with stack traces, such as `std.testing.allocator` — that allocation unwinds the stack, which
+needs the same lock: the process hangs on a futex. Pass `std.debug.getDebugInfoAllocator()`
+(what std itself uses) for both the symbol list and the text arena.
+
 ## std.Io
 
 ### Cancellation is erased at the `Io.Reader` boundary

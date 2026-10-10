@@ -259,10 +259,12 @@ const color = randomElement([]const u8, random, &colors);
 ### Random Sample (Without Replacement)
 
 ```zig
-fn sample(comptime T: type, random: std.Random, source: []const T, dest: []T) void {
+/// `indices` is caller-provided scratch space (source.len is a runtime value, so it
+/// cannot size a local array); needs indices.len >= source.len and dest.len <= source.len.
+fn sample(comptime T: type, random: std.Random, source: []const T, dest: []T, indices: []usize) void {
+    std.debug.assert(indices.len >= source.len and dest.len <= source.len);
     // Fisher-Yates partial shuffle
-    var indices: [source.len]usize = undefined;
-    for (&indices, 0..) |*idx, i| idx.* = i;
+    for (indices[0..source.len], 0..) |*idx, i| idx.* = i;
 
     for (dest, 0..) |*d, i| {
         const j = random.intRangeLessThan(usize, i, source.len);
@@ -357,11 +359,12 @@ The built-in `floatNorm` uses ziggurat algorithm. For explicit Box-Muller:
 
 ```zig
 fn boxMullerPair(random: std.Random) struct { f64, f64 } {
-    const u1 = 1.0 - random.float(f64);  // (0, 1]
-    const u2 = random.float(f64);         // [0, 1)
+    // (do not name these u1/u2: they would shadow the primitive types u1/u2)
+    const uni1 = 1.0 - random.float(f64);  // (0, 1]
+    const uni2 = random.float(f64);         // [0, 1)
 
-    const r = @sqrt(-2.0 * @log(u1));
-    const theta = 2.0 * std.math.pi * u2;
+    const r = @sqrt(-2.0 * @log(uni1));
+    const theta = 2.0 * std.math.pi * uni2;
 
     return .{ r * @cos(theta), r * @sin(theta) };
 }
