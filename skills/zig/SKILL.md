@@ -273,7 +273,7 @@ Removed or changed without a rename in the table above (each checked in the 0.17
 `unlockPointers()`): a hand-written literal `.{ .items = &.{}, .capacity = 0 }` no longer
 compiles — use `.empty` or `.initBuffer(&buf)`.
 
-Deprecated names still compile, with no warning, and neither `zig build`, `zig test` nor any
+Deprecated names still compile silently (the compiler prints nothing about them), and neither `zig build`, `zig test` nor any
 flag lists them (`--help` of both checked). To find them in a project, grep for the left column
 of the tables above and for the names the deprecation bullets mention, e.g.
 `rg -n 'indexOf|lastIndexOf|allocPrint|bufPrint|ArrayListUnmanaged|std\.builtin|DebugAllocator|\.getLast|@intFromEnum|@enumFromInt' src build.zig`
