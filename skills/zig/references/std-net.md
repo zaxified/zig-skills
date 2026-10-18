@@ -239,7 +239,7 @@ if (std.Io.net.has_unix_sockets) { ... }
 
 ---
 
-> **Note:** All sections below document the **0.15.x API** and are retained for reference. If you are targeting Zig 0.16+, use the migration guide above.
+> **Note:** The sections below document the **0.15.x API** and are retained for reference only; almost none of it compiles on 0.17.0. Exceptions, compiled on 0.17.0: "Writing to Stream", "Reading from Stream" and "Error Handling" (they assume a connected `stream` and an `io`). Every other block that passes an `io` is a hybrid mixing 0.15 calls with 0.16-style code; each is marked "0.15 API, does not compile on 0.17.0" in its first line. Do not copy those. Use the migration guide above.
 
 ---
 
@@ -502,25 +502,23 @@ pub const Stream = struct {
 
 ### Reading from Stream
 
-```zig
-const stream = try net.tcpConnectToHost(allocator, "example.com", 80);
-defer stream.close();
+Valid on 0.16/0.17 (`stream` is a connected `Io.net.Stream`, `io` the `Io` instance; compiled on 0.17.0). `interface` is a field, not a call, and the underlying error is the `reader.err` field:
 
+```zig
 var buf: [4096]u8 = undefined;
 var reader = stream.reader(io, &buf);
-const r = reader.interface();
+const r = &reader.interface;
 
 // Read bytes
 const data = r.take(100) catch |err| switch (err) {
     error.EndOfStream => &.{},
-    error.ReadFailed => return reader.getError().?,
+    error.ReadFailed => return reader.err.?,
 };
 
 // Read until delimiter
 const line = r.takeDelimiter('\n') catch |err| switch (err) {
-    error.EndOfStream => null,
     error.StreamTooLong => return error.LineTooLong,
-    error.ReadFailed => return reader.getError().?,
+    error.ReadFailed => return reader.err.?,
 } orelse return;
 
 // Discard bytes
@@ -549,9 +547,11 @@ try w.flush();
 
 ### Error Handling
 
+Valid on 0.16/0.17 (compiled on 0.17.0):
+
 ```zig
 var reader = stream.reader(io, &buf);
-const r = reader.interface();
+const r = &reader.interface;
 
 const data = r.take(100) catch |err| switch (err) {
     error.EndOfStream => {
@@ -560,10 +560,10 @@ const data = r.take(100) catch |err| switch (err) {
     },
     error.ReadFailed => {
         // Get underlying error
-        const read_err = reader.getError().?;
+        const read_err = reader.err.?;
         switch (read_err) {
             error.ConnectionResetByPeer => return error.Disconnected,
-            error.SocketNotConnected => return error.Disconnected,
+            error.SocketUnconnected => return error.Disconnected,
             else => return read_err,
         }
     },
@@ -629,6 +629,7 @@ if (net.has_unix_sockets) {
 ### Connect to Unix Socket
 
 ```zig
+// 0.15 API, does not compile on 0.17.0 (hybrid: 0.15 connect + 0.16-style reader/writer)
 const stream = try net.connectUnixSocket("/var/run/app.sock");
 defer stream.close();
 
@@ -641,6 +642,7 @@ var writer = stream.writer(io, &buf);
 ### Unix Socket Server
 
 ```zig
+// 0.15 API, does not compile on 0.17.0 (hybrid: 0.15 server + 0.16 Io.Dir call)
 const address = try net.Address.initUnix("/tmp/my.sock");
 var server = try address.listen(.{ .reuse_address = true });
 defer server.deinit();
@@ -686,6 +688,7 @@ pub fn main() !void {
 ### Simple HTTP GET
 
 ```zig
+// 0.15 API, does not compile on 0.17.0 (hybrid, never compiled): see Migration above
 fn httpGet(allocator: Allocator, host: []const u8, path: []const u8) ![]u8 {
     const stream = try net.tcpConnectToHost(allocator, host, 80);
     defer stream.close();

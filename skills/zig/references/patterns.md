@@ -288,6 +288,8 @@ These patterns are extracted from the Zig standard library and represent establi
 Use a local struct with `@fieldParentPtr` to capture context when you need a function pointer with associated state.
 
 ```zig
+// Excerpt from older std source (0.15 Thread.Pool/WaitGroup, removed in 0.16): shows the
+// @fieldParentPtr closure technique only; the types it uses no longer exist.
 pub fn spawnWg(pool: *Pool, wait_group: *WaitGroup, comptime func: anytype, args: anytype) void {
     wait_group.start();
 
@@ -507,7 +509,7 @@ fn swizzleRgbaToBgra(rgba: [4]u8) [4]u8 {
 const first, _, const third, _ = some_array;
 
 // Works with comptime
-comptime const x, const y = .{ 1, 2 };
+const x, const y = comptime .{ 1, 2 };  // `comptime const` is an error
 ```
 
 **When to use:** Multiple return values, array element extraction, SIMD vector unpacking.
@@ -593,6 +595,8 @@ pub const PaxIterator = struct {
 Use `pub const init: T = .{...};` for default/initial values.
 
 ```zig
+// Excerpt from older std source (0.15 Thread.Mutex.Recursive, removed in 0.16): shows the
+// `pub const init: T = .{...}` idiom only.
 // GOOD: Named constant with explicit type
 pub const Recursive = struct {
     mutex: Mutex,

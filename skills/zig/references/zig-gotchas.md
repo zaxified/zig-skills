@@ -37,11 +37,19 @@ and `-OReleaseSafe` still work — keep the old spellings in scripts that must a
 ### Silent behaviour changes
 - **`@bitCast` of arrays and vectors** now reinterprets logical bits, element 0 first: on a
   big-endian target an array-to-integer cast gives a different value than in 0.16. Little-endian
-  results are unchanged. (A cast of an `extern struct` stopped compiling, so it cannot go
-  silently wrong.)
+  results are unchanged. Run-verified in a migration on s390x under qemu (ReleaseSafe): dropping
+  the old big-endian byte swap before such a cast took a ChaCha20-Poly1305 module from 27 to 49
+  of 55 tests (0.16: 49), see SKILL.md "Silent changes". (A cast from or to an `extern struct` stopped compiling — both
+  directions — so it cannot go silently wrong.) The replacement for the "bytes as they lie in
+  memory" idiom (a network-order address in a `u32` field, a kernel-ABI word) is
+  `std.mem.bytesToValue(u32, &bytes)` / `std.mem.toBytes(x)` (`mem.zig` `bytesToValue`,
+  `toBytes`); for a fixed wire order `std.mem.readInt(u32, &bytes, .big)` /
+  `std.mem.writeInt(u32, &bytes, x, .big)`.
 - **`@hasDecl` is `false` for a non-`pub` declaration**, also from inside the same file. A
   `comptime` feature probe written as `@hasDecl(Self, "helper")` on a private helper flips to
-  `false` and silently takes the fallback path.
+  `false` and silently takes the fallback path. The same flip hits option declarations a
+  consumer supplies for a library that probes them with `@hasDecl` (without `pub` the option
+  is ignored, which can change a wire format or a default): list the probes with `rg '@hasDecl'`.
 - **`std.mem.containsAtLeastScalar(T, list, element, minimum)`** swapped its last two
   parameters. With `u8`/`usize`-compatible integers an old call still compiles and answers a
   different question.
@@ -49,17 +57,71 @@ and `-OReleaseSafe` still work — keep the old spellings in scripts that must a
   Use-after-free turns into a segfault or a panic much more often — good — but a test that
   allocates and frees in a long loop grows its RSS with the total it allocated, not its peak.
   Writes after free are checked in every mode; allocation stack traces exist only in Debug.
+  A fuzz or property loop that runs thousands of seeds inside one test should create one
+  `std.heap.SafeAllocator` per seed (`.init(gpa, .{ .stack_trace_frames = 0 })`, `deinit()` returns
+  the leak count, `deinitLog(false)` is the silent form) — with `testing.allocator` the RSS
+  grows with every seed and a memory-capped job looks like a hang or flaky kill. Because
+  `SafeAllocator` can resize in place, `FailingAllocator` `fail_index` values pinned in 0.16
+  tests may no longer be reached: take them from `alloc_index` of a clean run.
+- **`Reader.allocRemaining(gpa, .limited(n))` accepts exactly `n` bytes** (0.16 failed at `n`;
+  `Io/Reader.zig` `allocRemaining` passes `n + 1` to `appendRemaining`, which fails when its
+  limit is *reached*). Every body/size limit built on it shifts by one: check each call site and
+  its over-limit test (a test written for `n` bytes may now pass silently; a limit that meant
+  "< n" is now "<= n"). Adjust the argument, not the documented limit. `appendRemaining` itself
+  is unchanged. `Limit.limited(std.math.maxInt(usize))` is `.unlimited` in this function
+  (`allocRemaining` maps `.unlimited` through unchanged and adds the 1 itself, `Io/Reader.zig`
+  `allocRemaining`), so a call site that wrote `cap +| 1` or special-cased `maxInt` to avoid the
+  overflow should pass `.limited(cap)` and map an "unbounded" cap to `.unlimited`.
+- **A struct returned by value must not hold a slice into its own array field.** This is
+  undefined in every version; 0.17 exposed it in a migration (the copy happens, so `.val = self.buf[0..k]` points at the
+  callee's dead frame) (found as a panic in a websocket parameter iterator). Store an offset and
+  length and slice at use, or let the caller own the buffer.
 
 ### Tooling
 - **ZLS does not work with 0.17.0** (the build runner it hooked into is gone). Editor
   diagnostics stay empty or stale; compile to see errors.
 - **The first `zig build` after installing 0.17 compiles the maker** (measured twice:
   108 s and 115 s, Zig 0.17.0, x86_64 Linux, 8-core machine; once per toolchain and global cache). A fresh CI runner pays it on every job unless
-  the global cache (`~/.cache/zig`) is cached.
+  the global cache (`~/.cache/zig`) is cached; a CI script that gives every lane its own
+  `ZIG_GLOBAL_CACHE_DIR` pays it once per lane. On a developer machine the cache usually already
+  has the maker from another 0.17 project (a first build of a small project, zig-fping ~4.3k
+  lines, took 5.7 s in total; maker already in the global cache, Zig 0.17.0, x86_64 Linux, 8-core machine).
+- **Custom build steps (`makeFn`) no longer exist** — see SKILL.md "Build system" for the
+  host-tool + Run-step replacement.
+- **`zig build` prints a trailing `failed command: <test binary> ... --listen=-` line after
+  the output of a test that wrote to stderr, although the step succeeded** (reproduced on
+  0.17.0 with a one-test project whose test calls `std.debug.print`: exit code 0, summary
+  `test success`). It is not an error; judge by the exit code and the Build Summary.
 - **Cache manifests in `.zig-cache/h/` are binary.** A script that parsed them as text (a
   coverage or cache-inspection tool) breaks; `zig cache-cat <path>` prints one as ZON.
 - **LLVM 22.** Code generation changed: redo constant-time checks of the binary (valgrind
   taint, objdump) and benchmark baselines. Loop vectorization is still disabled, as in 0.16.
+  Seen in a migration: LLVM 22 split `if (invalid != 0)` (with `invalid` built from two
+  or-ed masks) into two conditional jumps to the same reject block, i.e. one control-flow path
+  per failure reason in a padding check that must have one (an AES-CBC unpadder, found by
+  ctgrind; whether it splits depends on the inlining context the consumer chooses). Fix: fold
+  the flag first and pass it through an empty-asm barrier before the single branch
+  (`asm volatile ("" : [v] "+r" (flag));` — guard it with `@inComptime()`, inline asm cannot
+  run at comptime), and test that the barrier's verdict equals a branchy reference.
+  A second case from the same migration (found by objdump of a ReleaseFast build): a secret
+  mask `key.cw_final & (0 -% bit)` became `test $1,%r13b; je` over the load of `cw_final`, a
+  jump on the secret bit. Fix: build the mask once in a single `usize` word passed through the
+  same empty-asm barrier, replicate it to the element width, guard with `@inComptime()`, and
+  check the result equals a branchy reference (taken from the migration report; the objdump
+  was not re-run for this skill).
+- **LLVM 22 can tail-merge identical branch tails of inlined functions into one instruction
+  that has no source line.** valgrind/DWARF then reports `main (harness.zig:0)` and the
+  library frame is missing from the stack, so a tool that counts "contexts inside the module
+  file" sees the count drop (1 to 0) while the branch still exists: a fail-open attribution
+  (observed in a ctgrind harness whose two AES-CBC unpadders were inlined into `main` and their
+  identical vector-scan tails merged, ReleaseFast). Call each routine under test through its own
+  `noinline fn strip(comptime f: anytype, buf: []u8)` instance (the routine is still inlined
+  into it, but never merged with another), and compare the count against a pin.
+- **Frame paths in 0.17 debug info are package-relative** (`std/Io/Writer.zig:1944`,
+  `modules/<m>/src/x.zig:80`), while compiler_rt frames stay bare (`memcpy.zig`). A tool that
+  parses stack traces or valgrind frames and compares the whole path against `Writer.zig` or
+  `foo.zig` matches nothing now: key on the basename, and require a `std/` directory when you
+  mean the standard library.
 - **Known 0.17.0 regressions** (release notes): response files in `std.Build.Step.Run`
   (#36444, a casualty of the configurer/maker split), `std.debug.simple_panic` does not
   compile (#36986), weak symbols of Zig's libc cannot reliably be overridden, soft-float
@@ -122,6 +184,34 @@ test "one type per config" {
     try std.testing.expect(Store(.{ .id = 1 }) != Store(.{ .id = 2 }));
 }
 ```
+
+### `@bitCast` between a byte array and wider lanes compiles to a byte loop
+
+New in 0.17.0 (LLVM 22), performance only: `@bitCast` from `[N]u8` to a vector of wider lanes
+(or to a 16-byte-or-larger integer), and back, is lowered byte by byte (movzbl/shld over a wide
+integer) instead of one vector load. Same logical little-endian result, about 9-26x the instructions in the cases measured below.
+Vector-to-vector `@bitCast` and `[N]u8` <-> `@Vector(N, u8)` coercion are plain vector moves,
+so go through the byte vector:
+
+```zig
+// SLOW on 0.17: byte-by-byte loop
+fn load(p: *const [16]u8) @Vector(2, u64) { return @bitCast(p.*); }
+
+// FAST: coerce to @Vector(16, u8), then vector -> vector @bitCast (one vmovdqu)
+fn load(p: *const [16]u8) @Vector(2, u64) {
+    const v: @Vector(16, u8) = p.*;
+    return @bitCast(v);
+}
+```
+
+Same for the store direction: `@as(@Vector(16, u8), @bitCast(lanes))` assigns to a `[16]u8`.
+The meaning is little-endian-logical on every target, so no endian branch is needed.
+
+Measured here (`zig build-obj -OReleaseFast -target x86_64-linux -mcpu=x86_64_v3`, objdump
+instruction count per function including `ret`): `[16]u8` -> `@Vector(2, u64)` 52 direct vs 6
+via `@Vector(16, u8)`; `[32]u8` -> `@Vector(8, u32)` 157 vs 6. A migration of a Poly1305
+implementation saw 6 -> 51 and 8 -> 142 versus 0.16 for the same casts (14.5x total
+instructions in the hot function); the byte-vector detour fixed it. Other targets not measured.
 
 ### `@intFromFloat` out of range is illegal behaviour
 
@@ -338,7 +428,11 @@ Still true in 0.17.0 (measured with valgrind memcheck taint on ReleaseFast build
 selection in `ff.Modulus.pow` and the final-subtraction check in `montgomeryMul` branch on
 secret data, and LLVM 22 turns a hand-written `f64` mask select into a branch. Do not assume
 `std.crypto.ff` (RSA-style big-number arithmetic) is constant-time; verify the binary, not the
-source.
+source. There are such contexts on 0.17.0 too: the window select is `cmov` ->
+`ct.select` per limb (`crypto/ff.zig` `cmov` and its use in `powWithEncodedExponentInternal`),
+which LLVM 22 unswitches into jumps (16 valgrind contexts in one ctgrind positive-control
+harness, ReleaseFast, 0.17.0; 0.16's `cmov(ct.eql)` select also compiled to jumps, but its context count for the same harness was not recorded).
+The 0.17.x length fix below does not make the window select constant-time.
 
 ### `Certificate.verify` does not check that the issuer is a CA
 
@@ -348,8 +442,9 @@ certificate. Code that builds its own chain check must reject an issuer without 
 
 ### `std.crypto` leaves key schedules on the stack
 
-Found on 0.16.0; not re-measured on 0.17.0 (the AES code did not change in a way that would
-scrub it).
+Found on 0.16.0; not re-measured on 0.17.0. The AES-NI path did not change; on targets
+without AES hardware the software context is now bitsliced and several KB, so the residue
+is larger (see "Known 0.17.0 library behaviour").
 
 After a TLS 1.3 handshake, the AES round keys (176-byte `AesEncryptCtx`, round key 0 is
 the raw key) were found at about ten places on the dead stack below the caller.
@@ -374,6 +469,9 @@ Checked on 0.16.0. In 0.17.0 fetched packages are also copied into `zig-pkg/` in
   branch is rejected. Updates only arrive through a deliberate `zig fetch --save`.
 - `zig build --fork=/path/to/checkout` overrides a package throughout the dependency tree
   without editing the manifest, which is safer than temporarily switching the pin to `.path`.
+  With one matching package it works (run in a migration, six example apps). With two or more
+  matching packages it fails on 0.17.0 according to #31677 and the fix commit's message
+  (`026e105`, on the 0.17.x branch; not reproduced here).
 
 ### The self-hosted x86_64 backend cannot encode what the target CPU lacks
 
@@ -448,3 +546,62 @@ queries and test helpers all test the comptime condition before the run-time one
 - Deleting `.zig-cache/o` no longer wedges `zig build`: the configurer reruns.
 - `std.testing.allocator` leaks fail the test in ReleaseFast too (0.16 passed them silently).
 - `std.process.getUserInfo(io, name)` compiles and works.
+
+## Known 0.17.0 library behaviour (read from the 0.17.0 source)
+- **`std.crypto.ff` `powWithEncodedExponent` loops over the exponent bytes as given**
+  (`ff.zig` `powWithEncodedExponentInternal`): the running time reveals the encoded length.
+  With a secret exponent, pass it encoded at the modulus byte length (left-padded) yourself;
+  `powWithEncodedPublicExponent` is for public exponents only. A fix upstream is reported on
+  the 0.17.x branch and is not in 0.17.0.
+- **`ff.Fe.eql` compares limbs only** (`ff.zig` `eql` -> `x.v.eql(y.v)`, the `montgomery` flag is
+  ignored): a plain and a Montgomery-form element of the same number compare unequal (and
+  limbs can coincide for different numbers). Convert both operands to the same form first.
+- **`std.crypto.ecdsa` reads `Curve.Fe.field_order`** (`crypto/ecdsa.zig` verify:
+  `comptime assert(n < Fe.field_order and Fe.field_order < 2 * n)`): a hand-written curve type
+  passed to `Ecdsa` needs a `comptime_int` `field_order` on its field type, next to the
+  scalar field's. The scalar side must also be a `comptime_int`: std computes `2 * n` at
+  comptime (`crypto/ecdsa.zig` verify), and a `u256` `field_order` overflowed it in a migration.
+- **`std.crypto.ff.Error` gained `DivisionByZeroError`** (`crypto/ff.zig:56-59`, raised by
+  `divRemPublic` and `gcdPublic`; 0.16 `ff.zig` has no `DivisionByZero`). An `else =>` arm over
+  a switch on an ff error set now silently absorbs it; list the arms explicitly.
+- **Soft AES is bitsliced unless `std.options.side_channels_mitigations == .none`**
+  (`crypto/aes/soft.zig:6-8`, `:294`): `optimal_parallel_blocks` is `bitsliced.width` (1 on
+  0.16), and the software context is large (3024 bytes on s390x, 4112 on mips in a migration
+  probe). Code that sizes a buffer from `optimal_parallel_blocks` or asserts
+  `@sizeOf(AesCtx)` changes on targets without AES hardware (and in tests of them).
+- **`std.crypto.tls.Client` still has two unchecked paths in `readIndirect`** (from reading the
+  0.17.0 source, `crypto/tls/Client.zig:1250-1270`; std itself was not run on a malicious peer,
+  our copy of the 0.16 code was and crashed 3 of 3 with the checks removed). Both need an
+  authenticated peer; they panic in safe builds and are undefined behaviour in ReleaseFast.
+  (A) A `.handshake` record shorter than 4 bytes (or empty) indexes `cleartext[ct_i]` and
+  `cleartext[ct_i..][0..3]` with no length guard before the `handshake_len` check. (B) A
+  `key_update` message on a TLS 1.2 connection reads `p.tls_1_3`, the inactive union field. The
+  KeyUpdate body-length check (`handshake.len != 1`) is present. If you embed this client for
+  untrusted servers, patch a copy (length guard before `cleartext[ct_i]`, reject `key_update` unless TLS 1.3), or do not use it against untrusted servers. A reader in front does not help: both paths act on the decrypted record.
+- **`std.crypto.Certificate.der.Tag.sequence_of` is gone**; the tag is `set` (`= 17`,
+  `crypto/Certificate.zig` `Tag`). `rsa.PKCS1v1_5Signature.verify` / `rsa.PSSSignature.verify`
+  take `sig: *const [modulus_len]u8` (0.16: `[modulus_len]u8` by value): pass `&sig` (`Certificate.zig` `verify`).
+- **`Edwards25519.fromBytes` rejects the encoding x = 0 with the sign bit set**
+  (`crypto/25519/edwards25519.zig` `fromBytes`, `InvalidEncoding`), so a test that used std as a lenient reference for
+  such a point now sees an error.
+
+## Known 0.17.0 issues fixed on the 0.17.x branch
+
+Taken from the 0.17.x branch commit log and the project's issue list. **Per the commit
+message, not reproduced here** unless a row says otherwise; each row names the commit.
+Check which point release you have; the last row is an open pull request, not a branch fix.
+
+| Commit | Symptom (as the message states it) |
+|---|---|
+| `20057b4` | An array sentinel is discarded when a sentinel-terminated array is coerced to a slice |
+| `026e105` (#31677) | `zig build --fork=<dir>` with two or more matching packages always fails |
+| `388c02e`, `c629ee4` | `Io.net` control-message (cmsg) alignment; `Stream` read after control data |
+| `d3b1f18` | mips `syscall4` and up lack the `$a3` output |
+| `c6044e6` | `base64` decoded-size bound wrong |
+| `4465f34` | `aessiv` with empty input |
+| `15c1d31` | `std.http` request-body edge cases |
+| `bf93660` | `stack_protector` is not part of the cache key: stale objects after toggling it |
+| `a81a808` | `@shrExact` does not emit `shr_exact` under safety |
+| `7c793c2` | `checkAllAllocationFailures` / `NondeterministicMemoryUsage` (see std-testing.md for a workaround that was compiled and run) |
+| `12caf4e` | `powWithEncodedExponent` length leak (see above) |
+| `Io.Event.waitTimeout` spurious wakeups (#36912) | open pull request, not merged anywhere |

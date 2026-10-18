@@ -331,6 +331,9 @@ event.waitTimeout(io, .{ .duration = .{ .raw = .fromSeconds(1), .clock = .awake 
     error.Timeout => { /* handle timeout */ },
     error.Canceled => return err,
 };
+// 0.17.0: waitTimeout can return error.Timeout on a spurious wakeup while the event is still
+// unset (upstream #36912, not merged). If a Timeout must mean "deadline passed", re-check
+// event.isSet() and the clock in a loop (see mcp-server-patterns.md `waitEvent`).
 ```
 
 ### Group (was WaitGroup / Pool)

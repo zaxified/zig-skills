@@ -74,6 +74,13 @@ These are **objective errors** that will cause compilation failures or guarantee
 - `@hasDecl(T, "name")` on a non-`pub` declaration is now `false`, even within the same file.
 - `std.mem.containsAtLeastScalar(T, list, a, b)` — the third argument is now the element and
   the fourth the minimum count; a call written for 0.16 may still compile.
+- `Reader.allocRemaining(gpa, .limited(n))` accepts exactly `n` bytes (0.16 failed at `n`); a
+  workaround such as `cap +| 1` now over-reads by one.
+- `@bitCast` of `@Vector(n, bool)` to an integer: lane i is bit i on every target.
+- A struct returned by value holding a slice into its own array field: dangles (undefined in
+  every version; 0.17 exposed it).
+- A hot `[N]u8` <-> wider-lane vector or >= 16-byte integer `@bitCast` (not `[4]u8`<->`u32` / `[8]u8`<->`u64`, a single load) compiles to a byte loop (correct but
+  slow); go through `@Vector(N, u8)`.
 - `@intFromEnum` / `@enumFromInt`, `std.builtin`, `std.heap.DebugAllocator`, `std.fmt.allocPrint`,
   `std.fmt.bufPrint`, `std.mem.indexOf*` — deprecated, to be removed; use `@backingInt` /
   `@fromBackingInt`, `std.lang`, `SafeAllocator` (or `init.gpa`), `allocator.print`,
@@ -535,6 +542,8 @@ Missing standard options prevents proper cross-compilation and optimization.
 |---------|---------|-----------|
 | Hardcoded target | No cross-compilation | Missing `b.standardTargetOptions()` |
 | Hardcoded optimize | No release builds | Missing `b.standardOptimizeOption()` |
+| `Step.makeFn` / user-defined `Step.init` | Custom steps are gone in 0.17 (closed `Step.Tag` set) | Replace with a host executable + Run step (SKILL.md "Custom build steps are gone") |
+| Undeclared configure-time reads (files, `findProgram`, env) | The cached configuration goes stale | `dependOnDirectoryContents`, `findProgramLazy`, `--cache-poison=disallowed` (SKILL.md "Build system") |
 
 **Examples:**
 

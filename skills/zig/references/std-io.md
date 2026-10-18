@@ -444,7 +444,8 @@ defer _ = gpa.deinit();
 
 > The `std.Io` APIs are young and changed between 0.15, 0.16 and 0.17 — pin the toolchain
 > (`build.zig.zon` `minimum_zig_version`). Grep the actual std for current shapes:
-> `~/.cache/zig/p/<hash>/lib/std/{Io.zig,Io/Dir.zig,process.zig,start.zig}`.
+> `<lib_dir>/std/{Io.zig,Io/Dir.zig,process.zig,start.zig}` (`zig env` prints `lib_dir`; std ships with
+> the toolchain, not in the package cache).
 
 ## Common Patterns
 

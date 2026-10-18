@@ -68,12 +68,10 @@ pub const File = struct {
 
 File content must be read before calling `next()` again:
 
-**Untrusted archive:** `file.name` comes from the archive and may contain `..` or be absolute (zip-slip). Validate it (no `..` component, not absolute) before using it as a path, or extract with `std.tar.extract` (see "Extracting to Filesystem"), which does the checks.
-
 ```zig
 while (try it.next()) |file| {
     if (file.kind == .file) {
-        // Option 1: Stream to writer (file.name must be validated first, see above)
+        // Option 1: Stream to writer (file.name must be validated first, see "Untrusted archive" below)
         var buf: [1024]u8 = undefined;
         const output_file = try dir.createFile(io, file.name, .{});
         defer output_file.close(io);
@@ -86,6 +84,46 @@ while (try it.next()) |file| {
         defer content.deinit();
         try it.streamRemaining(file, &content.writer);
         const bytes = content.written();  // []const u8
+    }
+}
+```
+
+**Untrusted archive:** `file.name` comes from the archive and may contain `..` or be absolute (zip-slip). Validate it (no `..` component, not absolute) before using it as a path. `std.tar.extract` does **not** make an archive safe: it sanitizes entry *names* only (`sanitizePath`, `lib/std/tar.zig:676-705`), while a symlink entry's target (`file.link_name`) goes unchecked into `dir.symLink` (`tar.zig:634-636, 664-674`), and files are created without `resolve_beneath`. An archive with `x -> /some/abs/dir` followed by `x/file` therefore writes outside the destination. For untrusted input use the iterator, reject `.sym_link` entries, validate names, and extract into a fresh empty directory (compiled and run on 0.17.0):
+
+```zig
+fn nameIsSafe(name: []const u8) bool {
+    // Conservative on purpose: `\` and `:` are rejected too, so the check also holds on
+    // Windows (`..\x`, `\x`, `C:\x`, UNC `\\host\share`); it refuses legal POSIX names with those bytes.
+    if (name.len == 0 or name[0] == '/' or std.mem.findAny(u8, name, "\\:\x00") != null) return false;
+    var parts = std.mem.splitScalar(u8, name, '/');
+    while (parts.next()) |part| {
+        if (std.mem.eql(u8, part, "..")) return false;
+    }
+    return true;
+}
+
+fn extractUntrusted(io: std.Io, dest: std.Io.Dir, reader: *std.Io.Reader) !void {
+    var name_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    var link_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    var it: std.tar.Iterator = .init(reader, .{
+        .file_name_buffer = &name_buf,
+        .link_name_buffer = &link_buf,
+    });
+    while (try it.next()) |entry| {
+        if (!nameIsSafe(entry.name)) return error.UnsafeTarEntry;
+        switch (entry.kind) {
+            .sym_link => return error.SymlinkInUntrustedTar, // or skip it
+            .directory => try dest.createDirPath(io, entry.name),
+            .file => {
+                if (std.Io.Dir.path.dirname(entry.name)) |parent| try dest.createDirPath(io, parent);
+                const out = try dest.createFile(io, entry.name, .{ .exclusive = true });
+                defer out.close(io);
+                var wbuf: [4096]u8 = undefined;
+                var fw = out.writer(io, &wbuf);
+                try it.streamRemaining(entry, &fw.interface);
+                try fw.interface.flush();
+            },
+        }
     }
 }
 ```
@@ -104,7 +142,7 @@ pub const Options = struct {
 
 ### extract
 
-Extract entire archive to a directory:
+Extract entire archive to a directory. **Trusted archives only**: names are sanitized but symlink targets are not (see "Untrusted archive" above for the safe pattern):
 
 ```zig
 const data = @embedFile("archive.tar");

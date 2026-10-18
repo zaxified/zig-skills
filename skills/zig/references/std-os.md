@@ -44,7 +44,7 @@ const file = try std.Io.Dir.cwd().openFile(io, "data.txt", .{});
 const fd = try std.posix.openat(std.posix.AT.FDCWD, "data.txt", .{}, 0);
 
 // OS-specific (platform-specific features)
-const result = std.os.linux.syscall3(.read, fd, buf.ptr, buf.len);
+const result = std.os.linux.syscall3(.read, @as(usize, @intCast(fd)), @intFromPtr(buf.ptr), buf.len);
 ```
 
 ## Linux-Specific APIs
