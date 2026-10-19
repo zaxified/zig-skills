@@ -1,6 +1,6 @@
 # std.Io.net Reference (0.17.0; migrating from 0.15.x std.net)
 
-Cross-platform networking abstractions for TCP/IP connections, address handling, and DNS resolution.
+Cross-platform networking abstractions: TCP and Unix sockets, address parsing, connecting by host name, stream I/O.
 
 > **CRITICAL: Migration Required (since 0.16, unchanged in 0.17.0)**
 >
@@ -38,6 +38,8 @@ pub fn main(init: std.process.Init) !void {
 }
 
 // Elsewhere (library test harness, C entry point): build one and thread it through
+// In an executable use init.io. A bare `.init(gpa, .{})` has no `.environ`: children spawned
+// through it get an empty environment (pass `.environ = init.minimal.environ`).
 var threaded: std.Io.Threaded = .init(gpa, .{});
 defer threaded.deinit();
 const io = threaded.io();
