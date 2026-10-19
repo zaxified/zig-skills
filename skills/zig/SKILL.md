@@ -390,6 +390,16 @@ run_cmd.addPassthruArgs();   // forwards `zig build run -- a b c`
   `b.root.joinString(gpa, sub)` returns a path that already includes `root_dir`, so passing it
   to `b.root.root_dir.handle` doubles the prefix (`Cache/Path.zig` `joinString` vs `openDir`).
   `LazyPath.getDisplayName()` → `"{f}"`.
+  `Cache.Path` has no `readFileAlloc`: a 0.16 `b.build_root.handle.readFileAlloc(io, sub, …)`
+  becomes "declare, then read the joined path from `cwd()`" (checked on 0.17.0; editing the
+  file reran the configuration):
+  ```zig
+  b.dependOnFileContents(b.path(sub));
+  const full = try b.root.joinString(b.allocator, sub);
+  const text = try std.Io.Dir.cwd().readFileAlloc(b.graph.io, full, b.allocator, .limited(1 << 20));
+  ```
+- `b.dupe(s)` returns `[]const u8` (0.16: `[]u8`): to modify the copy in place
+  (`std.mem.replaceScalar`, …) use `b.allocator.dupe(u8, s)`.
 - **Custom build steps are gone.** `Step.makeFn`/`Step.init` with a user function no longer
   exist: a `Step` carries a `tag` from the closed `Configuration.Step.Tag` set (`compile`, `run`,
   `fmt`, `write_file`, `check_file`, `options`, …), because the maker executes a serialized
@@ -453,6 +463,29 @@ run_cmd.addPassthruArgs();   // forwards `zig build run -- a b c`
    Tell the user before they switch their toolchain: **ZLS does not work with 0.17.0**, so an
    editor on the project (VS Code, Neovim, …) loses diagnostics and completion until a ZLS
    release supports it; `zig build` is the error source meanwhile (see Tooling > ZLS).
+   **Check every dependency for a 0.17 line before touching your own code**: compare the
+   `build.zig.zon` pin with the upstream's branches and `master`; a dependency whose
+   `build.zig` does not configure on 0.17 stops the migration at its first step. Seen in one
+   migration: a SQLite wrapper package had no 0.17 line at all, a PostgreSQL client had one only
+   on `master` (read the diff before moving the pin). A wrapper around a C library can usually
+   be replaced by the C source itself: pin the upstream archive (here the SQLite amalgamation),
+   compile it in your own `build.zig` and translate its header with `b.addTranslateC` (see
+   "@cImport is removed" above). From that migration (builds and passes its tests on 0.17.0):
+   ```zig
+   // build.zig.zon: .sqlite = .{ .url = "https://www.sqlite.org/2025/sqlite-amalgamation-3490200.zip", .hash = … }
+   const amalgamation = b.dependency("sqlite", .{}).path(""); // a plain archive, no build.zig
+   const header = b.addTranslateC(.{               // translate the archive's header, never a system one
+       .root_source_file = amalgamation.path(b, "sqlite3.h"),
+       .target = target,
+       .optimize = optimize,
+   });
+   const lib = b.addLibrary(.{ .name = "sqlite", .linkage = .static, .root_module = b.createModule(.{
+       .target = target, .optimize = optimize, .link_libc = true,
+   }) });
+   lib.root_module.addCSourceFile(.{ .file = amalgamation.path(b, "sqlite3.c"), .flags = &.{"-std=c99"} });
+   mod.addImport("sqlite3", header.createModule()); // mod: the Zig module calling the C API (link_libc = true)
+   mod.linkLibrary(lib);
+   ```
 2. Parse first: `zig ast-check` every file — array `**`, `errdefer |e|`, `void{}`, `@cImport`
    stop at the parser.
 3. `zig fmt` rewrites `@intFromEnum`/`@enumFromInt`; the rest is by hand: struct-of-arrays
@@ -1202,6 +1235,7 @@ var server = std.http.Server.init(
 | `error: configuration failed: FileSystemFailure` | 0.17: `dependOn…Contents` on a path that does not exist — declare the nearest existing ancestor |
 | `no field named 'args' in struct 'Build'` | 0.17: `run_cmd.addPassthruArgs()` |
 | `no field named 'build_root' in struct 'Build'` | 0.17: `b.root` (a `Cache.Path`) |
+| `expected type '[]u8', found '[]const u8'` on `b.dupe(...)` | 0.17: `b.dupe` returns `[]const u8`; a mutable copy is `b.allocator.dupe(u8, s)` |
 | `no field named 'ReleaseFast' in enum 'lang.Optimize'` | 0.17: `.debug`, `.safe`, `.fast`, `.small` |
 | `'zon.parse' has no member named 'fromSliceAlloc'` | 0.17: `std.zon.parse.fromSlice(T, .{ .gpa, .arena, .source, .diagnostics })` |
 | `missing struct field: pointer_stability` | 0.17 ArrayList: initialize with `.empty`, not a field literal |
