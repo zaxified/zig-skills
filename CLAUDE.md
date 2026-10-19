@@ -40,3 +40,13 @@ python3 scripts/check-deprecated.py     # no deprecated/removed std name or synt
 A release is a `v*` tag whose commit contains `audits/<tag>.md` with the content id from
 `scripts/release.py content-id`, the review, `verdict: pass` and `approved-by:`. CI runs
 `scripts/release.py verify <tag>`. Only the maintainer tags and pushes.
+
+Order (tags are protected and SkillSpector runs only in CI, so a tag cut before the scan
+burns the version — it happened at r2 and r4):
+1. commit the content and `audits/<tag>.md` (content id of that commit);
+2. push `main` only, and wait for the `gate` workflow;
+3. `scripts/release.py tag <tag>` — refuses unless the tree is clean, HEAD is `origin/main`,
+   the record matches HEAD and every gate run on HEAD passed;
+4. the maintainer pushes the tag.
+A scanner finding in step 2 is a reword (never a suppression) and a new content id, not a new tag.
+`scripts/install.py` refuses a tag whose gate failed on any run, the tag's own included.

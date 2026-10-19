@@ -11,7 +11,12 @@ Before copying anything it checks, in the checkout it runs from:
   1. HEAD is exactly a v* tag (not a branch tip);
   2. audits/<tag>.md records that tag's content id with "verdict: pass" and
      "approved-by:" (scripts/release.py verify);
-  3. the safety gate passes on the content being installed (scripts/audit.py).
+  3. the safety gate passes on the content being installed (scripts/audit.py);
+  4. the `gate` CI workflow (safety gate + the SkillSpector scanner) passed on
+     the tag's commit on GitHub and no gate run on it failed or is still running
+     (scripts/release.py ci-status). A tag whose scanner run failed (v0.17.0-r2,
+     v0.17.0-r4) is refused. Needs network access to api.github.com, which the
+     clone above needs anyway.
 
 The destination gets skills/zig/ plus a .zig-skills-source.json manifest
 (tag, commit, content id, file list with sha256). An existing destination is
@@ -150,6 +155,9 @@ def install(dest, allow_untagged):
         r = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "release.py"), "verify", tag])
         if r.returncode:
             return fail(f"{tag} has no valid audit record; refusing")
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "release.py"), "ci-status", tag])
+        if r.returncode:
+            return fail(f"{tag} did not pass CI (safety gate + scanner); refusing")
     r = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "audit.py")], capture_output=True, text=True)
     if r.returncode:
         sys.stderr.write(r.stdout + r.stderr)
