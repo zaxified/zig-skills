@@ -140,7 +140,7 @@ still exists in the 0.17.0 std (`Build.zig`, `Build/Step/TranslateC.zig`; `link_
 true; `.createModule()` gives the module to import) and the toolchain ships the translator
 (`lib/compiler/translate-c`). The release notes call it deprecated in favour of the package
 (more options, own release cadence); the std source carries no deprecation marker and the
-compiler prints no warning. For a plain header with no extra options it is the route that needs
+compiler stays silent about it. For a plain header with no extra options it is the route that needs
 no network. Compiled and run on 0.17.0 for this skill (a header with a `static inline` function
 and a `#define`, imported through `.createModule()`); a migration used it for `sqlite3.h`, where
 the first use compiled the translator (about a minute).

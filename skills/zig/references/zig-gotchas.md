@@ -508,7 +508,7 @@ The 0.17.x length fix below does not make the window select constant-time.
 
 ### std TLS does not check that an issuer is a CA: `std.http.Client` over https is open to a man in the middle
 
-Still true in 0.17.0 and **not limited to code that builds its own chain check**.
+Still true in 0.17.0, and it **also hits code that never builds its own chain check**.
 `std.crypto.Certificate.Parsed.verify` (`crypto/Certificate.zig:259-308`) checks the issuer
 name, the validity dates and the signature, and nothing else: basicConstraints, keyUsage and
 pathLen are recognised by OID but never read or enforced (`basic_constraints` is only an enum tag,
