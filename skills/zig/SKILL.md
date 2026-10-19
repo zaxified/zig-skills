@@ -521,7 +521,7 @@ defer conn.close(io);
 // (`.link_libc = true`), std.c.close/write/socket/connect are the fallback.
 ```
 
-See **[std.net reference](references/std-net.md)** for complete networking documentation.
+See **[std.net reference](references/std-net.md)** for the std.net → std.Io.net migration and stream I/O.
 
 ## Critical: Time APIs Removed (0.16)
 
@@ -1191,7 +1191,7 @@ Load these references when working with specific modules:
 
 ### Networking
 - **[std.http](references/std-http.md)** - HTTP client/server, TLS, connection pooling, compression, WebSocket
-- **[std.net](references/std-net.md)** - TCP/UDP sockets, address parsing, DNS resolution
+- **[std.net](references/std-net.md)** - std.net → std.Io.net migration: TCP and Unix sockets, address parsing, connecting by host name, stream I/O
 - **[std.Uri](references/std-uri.md)** - URI parsing/formatting (RFC 3986), percent-encoding/decoding, relative URI resolution
 
 ### Process Management
