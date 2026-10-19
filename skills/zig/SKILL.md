@@ -1,6 +1,6 @@
 ---
 name: zig-0.17
-description: "Zig 0.17.0 patterns, checked against the released standard library. Use when writing, reviewing, or debugging Zig code for Zig 0.17.x (zig version / minimum_zig_version in build.zig.zon; a 0.16 project uses the zig skill instead), build.zig and build.zig.zon files, or comptime metaprogramming. Covers the 0.17 changes: array ** removed (@splat), errdefer capture and @cImport removed (translate-c package), @intFromEnum to @backingInt, struct-of-arrays @typeInfo (field_names, field_types), @bitCast on extern structs, @hasDecl pub-only, std.builtin to std.lang with .debug/.safe/.fast/.small, SafeAllocator and BufferFirstAllocator, Allocator.print and mem.print, mem.find, zon.parse with an arena, b.args to addPassthruArgs, custom build steps removed (host tool + Run step), array/vector @bitCast as logical little-endian bits, the #37131 signed-to-narrower-unsigned @intCast/math.cast miscompile in optimized builds, the configurer/maker build split with its cached configuration (undeclared configure-time reads go stale: dependOnDirectoryContents, poisonCache), optimize-mode spellings on the CLI, incremental builds with the self-hosted backend, and zig-pkg/. Also prevents older patterns from training data: the std.Io instance threaded through files, sockets, clocks and locks (std.fs to std.Io.Dir/File, std.net to std.Io.net, std.time timestamps and Timer to std.Io.Clock, std.Thread.Mutex/Condition/Pool to std.Io.Mutex/Condition/Group, std.crypto.random to io.randomSecure), main(init: std.process.Init), build system APIs (root_module, Compile methods to Module methods), buffered Reader/Writer with flush, removed async/await and usingnamespace; plus gotchas found in production code."
+description: "Zig 0.17.0 patterns, checked against the released standard library. Use when writing, reviewing, or debugging Zig code for Zig 0.17.x (zig version / minimum_zig_version in build.zig.zon; a 0.16 project uses the zig skill instead), build.zig and build.zig.zon files, or comptime metaprogramming. Covers the 0.17 changes: array ** removed (@splat), errdefer capture and @cImport removed (translate-c package), @intFromEnum to @backingInt, struct-of-arrays @typeInfo (field_names, field_types), @bitCast on extern structs, @hasDecl pub-only, std.builtin to std.lang with .debug/.safe/.fast/.small, SafeAllocator and BufferFirstAllocator, Allocator.print and mem.print, mem.find, zon.parse with an arena, b.args to addPassthruArgs, custom build steps removed (host tool + Run step), array/vector @bitCast as logical little-endian bits, the per-byte lowering of wide @bitCast and readInt/writeInt(u128) (#36256) that makes std AES-GCM 2.6x slower, the #37131 signed-to-narrower-unsigned @intCast/math.cast miscompile in optimized builds, the configurer/maker build split with its cached configuration (undeclared configure-time reads go stale: dependOnDirectoryContents, poisonCache), optimize-mode spellings on the CLI, incremental builds with the self-hosted backend, and zig-pkg/. Also prevents older patterns from training data: the std.Io instance threaded through files, sockets, clocks and locks (std.fs to std.Io.Dir/File, std.net to std.Io.net, std.time timestamps and Timer to std.Io.Clock, std.Thread.Mutex/Condition/Pool to std.Io.Mutex/Condition/Group, std.crypto.random to io.randomSecure), main(init: std.process.Init), build system APIs (root_module, Compile methods to Module methods), buffered Reader/Writer with flush, removed async/await and usingnamespace; plus gotchas found in production code."
 license: MIT
 compatibility:
   - claude-code
@@ -223,6 +223,29 @@ strings, so the `.name` of a declaration entry goes) instead of `decls`, `error_
   big-endian code needed `@bitReverse` after it (a match-mask extraction); remove it. Checked at
   comptime on x86_64 and mips-linux-musl with a negative control, and a mask-extraction routine
   ran correctly on s390x under qemu (migration observations).
+- **A `@bitCast` between `[N]u8` (N > 8) and a type with a different element size is a
+  per-byte loop in 0.17, and above 64 bits LLVM cannot fold it back (open, see #36256).** It
+  hits `u128`/`u96`/`u192`/`u256`/`u48` ↔ bytes, so every `std.mem.readInt`/`writeInt` of those
+  widths (both endians), and `[4]u32`, `[2]u64`, `[8]u64`, `@Vector(4, u32)`, `@Vector(2, u64)`
+  ↔ bytes. ReleaseFast x86_64, instructions per function 0.16 → 0.17: `readInt(u128, p, .big)`
+  7 → 52, `writeInt(u128, …)` 6 → 62, `[16]u8` → `[4]u32` 6 → 75, `[64]u8` → `[16]u32` 9 → 168.
+  Not hit: ≤ 64-bit integers, same-element-size casts (`[16]u8` ↔ `@Vector(16, u8)`, `[4]u32` ↔
+  `@Vector(4, u32)`), pointer casts. The std code pays too: `std.crypto.core.modes.ctr` writes
+  each counter with `writeInt(u128, …)` and GHASH uses `u128` casts, so on 0.17
+  `aes_gcm.Aes128Gcm` takes 2.6x and `onetimeauth.Ghash` 2.4x the cycles of 0.16 (16 KiB
+  messages), `base64.standard.Encoder` 1.33x; SHA-2 and BLAKE2 are unchanged. Workaround with
+  identical bytes: go through a pointer, which LLVM keeps as one load/store:
+  ```zig
+  // WRONG on 0.17 in a hot loop: ~60 instructions
+  std.mem.writeInt(u128, buf[0..16], ctr, .big);
+  // RIGHT: one byte swap + one unaligned store
+  @as(*align(1) u128, @ptrCast(buf[0..16])).* = std.mem.nativeToBig(u128, ctr);
+  const v = std.mem.bigToNative(u128, @as(*align(1) const u128, @ptrCast(buf[0..16])).*);
+  ```
+  Only worth it where the cast runs per block or per element; one conversion per operation costs
+  a few dozen instructions. To find every such cast with its call site, scan the Debug LLVM IR
+  (`zig test -ODebug -fllvm -fno-emit-bin -femit-llvm-ir=x.ll …`) for `zext i8 … to iN` /
+  `trunc iN … to i8` with N > 64 and follow each `!dbg` through its `inlinedAt` chain.
 - **`@intCast` / `std.math.cast` from a signed integer to a narrower *unsigned* one is
   miscompiled in optimized builds (open, see #37131; not fixed in 0.17.0).** The
   frontend emits LLVM `trunc nsw` (it should be `nuw`), so every value in the upper half of
