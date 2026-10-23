@@ -321,6 +321,37 @@ const v = try fail();
 o.* = .{ .b = v };
 ```
 
+### A pointer into a by-value parameter dangles
+
+Measured on 0.17.0 (LLVM; Debug, ReleaseSafe and ReleaseFast all return garbage, no safety
+check fires, valgrind memcheck sees nothing). A capture `|*k|` over a parameter taken by
+value points into this call's copy, which is gone when the function returns:
+
+```zig
+const Key = union(enum) { big: [64]u64, small: u8 };
+
+// WRONG: `k` points into the by-value `key`, dead after return
+fn pickByValue(key: Key) *const [64]u64 {
+    return switch (key) {
+        .big => |*k| k,
+        .small => unreachable,
+    };
+}
+
+// CORRECT: take the aggregate by pointer
+fn pick(key: *const Key) *const [64]u64 {
+    return switch (key.*) {
+        .big => |*k| k,
+        .small => unreachable,
+    };
+}
+```
+
+Whether the stale frame still holds the value depends on code layout: in production a
+Debug test suite stayed green and only a ReleaseFast interop check failed, and adding a
+debug print moved the failure to another code path. Search with `rg '=> \|\*\w+\| \w+,'`
+and check each function that returns such a capture or `&param.field`.
+
 ## std.debug
 
 ### `getSymbols` with a stack-tracing allocator deadlocks
@@ -367,6 +398,53 @@ Codeberg ziglang/zig issue 35724.
 Code that drives fibers directly: use a `noinline` copy of `contextSwitch` whose clobber list
 omits the input register, with a comment naming the issue so it can be removed once a release
 fixes it.
+
+### A custom `Io.Reader` with only `stream` stops buffering small reads
+
+Read from the 0.17.0 source (`Io/Reader.zig` `defaultReadVec`) and measured: a vtable that
+sets only `.stream` gets `defaultReadVec`, which streams straight into the caller's slice
+whenever that slice is at least the buffer's free tail, and nothing moves the unread bytes
+back to the front. Once the buffer has been filled to its end, every small `readSliceAll`,
+`readSliceShort` or `readVec` is one `stream` call of that size: 1024 reads of 8 bytes
+through a 256-byte buffer made 993 `stream` calls instead of 32. Over a socket or a file that
+is one syscall per field (a ZIP central-directory walk ran 4x slower than Go), over a
+decoder one decoder entry per field. `peek`, `take*` and `fill` are not affected; they
+rebase first.
+
+Give such a reader a `readVec` that rebases first, so the choice sees the whole buffer:
+
+```zig
+fn refillReadVec(r: *std.Io.Reader, data: [][]u8) std.Io.Reader.Error!usize {
+    const live = r.end - r.seek;
+    @memmove(r.buffer[0..live], r.buffer[r.seek..r.end]);
+    r.seek = 0;
+    r.end = live;
+    return std.Io.Reader.defaultReadVec(r, data);
+}
+// .vtable = &.{ .stream = stream, .readVec = refillReadVec }
+```
+
+A wrapper that reads its inner reader with `in.stream(w, limit)` (a length-limited body,
+a framing decoder) has the same problem one level down: with nothing buffered,
+`Reader.stream` hands the request straight to the inner vtable, so a handler reading an
+HTTP body 512 bytes at a time made one `recv` per call. Refill the inner reader first when
+the request is smaller than its buffer:
+
+```zig
+fn streamBuffered(in: *std.Io.Reader, w: *std.Io.Writer, limit: std.Io.Limit) std.Io.Reader.StreamError!usize {
+    if (in.bufferedLen() == 0 and limit.minInt(w.buffer.len - w.end) < in.buffer.len) {
+        in.fillMore() catch |err| switch (err) {
+            error.EndOfStream => return error.EndOfStream,
+            error.ReadFailed => return error.ReadFailed,
+        };
+    }
+    return in.stream(w, limit);
+}
+```
+
+To test it, give the reader a 64-byte buffer and read 8 bytes at a time. Assert that
+`bufferedLen() > 0` after most of the reads, or count the source's `stream` calls. Without
+the fix both fail.
 
 ## Testing and fuzzing
 
@@ -533,6 +611,37 @@ server (a CA:FALSE leaf signing a certificate for another name was accepted). Co
 - Code that builds its own chain check must reject an issuer without `CA:TRUE`.
 - Separate defects of the same client: see the `readIndirect` entry below (do not use the
   client against untrusted servers).
+
+### `std.mem.find` over secret text is not constant-time
+
+Read from the 0.17.0 source (`mem.zig` `findPos`): for a haystack of at least 52 elements
+and a needle longer than 4, `find`/`findPos` use Boyer-Moore-Horspool. The loop loads
+`skip_table[haystack[i + needle.len - 1]]`, an index taken from the haystack byte, and how
+far it skips depends on whether that byte occurs in the needle. Searching for
+`-----END PRIVATE KEY-----` forward through a PEM body leaks the base64 key that way, and a
+constant-time tester (ctgrind) flags it. Shorter needles take `findPosLinear`, which exits
+early on the first mismatch, so that is no help for secrets either. Over text that holds a secret, scan
+for a byte the secret's alphabet cannot contain (`std.mem.findScalarPos(u8, text, start, '-')`
+for base64, then `std.mem.startsWith`) instead of searching for the whole line.
+
+### `ecdsa` `SecretKey.fromBytes` accepts any 32 bytes
+
+Read from the 0.17.0 source (`crypto/ecdsa.zig`): `SecretKey.fromBytes` stores the bytes as
+given, and `KeyPair.fromSecretKey` multiplies the base point by them without checking the
+range, so a key of n or larger loads and acts as `d mod n`. A zero key fails only later, at
+the identity check. Check a key read from outside yourself:
+
+```zig
+const Ecdsa = std.crypto.sign.ecdsa.EcdsaP256Sha256;
+
+fn loadKey(bytes: [32]u8) !Ecdsa.KeyPair {
+    try std.crypto.ecc.P256.scalar.rejectNonCanonical(bytes, .big); // d < n
+    var any: u8 = 0;
+    for (bytes) |b| any |= b; // no early exit on a secret
+    if (any == 0) return error.InvalidKey;
+    return Ecdsa.KeyPair.fromSecretKey(try Ecdsa.SecretKey.fromBytes(bytes));
+}
+```
 
 ### `std.crypto` leaves key schedules on the stack
 
