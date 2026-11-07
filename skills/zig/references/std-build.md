@@ -487,7 +487,7 @@ update_step.dependOn(&update_src.step);
     .name = .myproject,             // an enum literal, not a string
     .version = "1.0.0",
     .fingerprint = 0x0123456789abcdef, // generated once: zig build prints the value to use
-    .minimum_zig_version = "0.17.0",
+    .minimum_zig_version = "0.17.1",
     .dependencies = .{
         .zlib = .{
             .url = "https://example.com/zlib-zig-1.0.0.tar.gz",
@@ -1034,7 +1034,7 @@ ZON (Zig Object Notation) is used for package manifests.
     .fingerprint = 0x0123456789abcdef,
 
     // Minimum Zig version (optional)
-    .minimum_zig_version = "0.17.0",
+    .minimum_zig_version = "0.17.1",
 
     // Dependencies (optional)
     .dependencies = .{

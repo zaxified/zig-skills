@@ -240,14 +240,18 @@ strings, so the `.name` of a declaration entry goes) instead of `decls`, `error_
   widths (both endians), and `[4]u32`, `[2]u64`, `[8]u64`, `@Vector(4, u32)`, `@Vector(2, u64)`
   ↔ bytes. ReleaseFast x86_64, instructions per function 0.16 → 0.17: `readInt(u128, p, .big)`
   7 → 52, `writeInt(u128, …)` 6 → 62, `[16]u8` → `[4]u32` 6 → 75, `[64]u8` → `[16]u32` 9 → 168.
-  Not hit: ≤ 64-bit integers, same-element-size casts (`[16]u8` ↔ `@Vector(16, u8)`, `[4]u32` ↔
+  `readInt(u48)` (6 bytes) takes 23 instructions against 6 for `u64` (on 0.17.0 and 0.17.1). Not
+  hit: 8/16/32/64-bit integers, same-element-size casts (`[16]u8` ↔ `@Vector(16, u8)`, `[4]u32` ↔
   `@Vector(4, u32)`), pointer casts. The std code pays too: `std.crypto.core.modes.ctr` writes
   each counter with `writeInt(u128, …)` and GHASH uses `u128` casts, so on 0.17
   `aes_gcm.Aes128Gcm` takes 2.6x and `onetimeauth.Ghash` 2.4x the cycles of 0.16 (16 KiB
   messages), `base64.standard.Encoder` 1.33x; SHA-2 and BLAKE2 are unchanged. Workaround with
-  identical bytes: go through a pointer, which LLVM keeps as one load/store:
+  identical bytes: go through a pointer, which LLVM keeps as one load/store (for a byte array
+  to wider lanes, the `@Vector(N, u8)` route in zig-gotchas.md "byte array and wider lanes" also
+  works: `[16]u8` → `@Vector(16, u8)` → `@Vector(2, u64)` is 5 instructions on 0.17.0 and 0.17.1). Re-measured on
+  0.17.1: `readInt(u128)` 52, unchanged (#36256 is still open):
   ```zig
-  // WRONG on 0.17 in a hot loop: ~60 instructions
+  // SLOW on 0.17 in a hot loop: ~60 instructions
   std.mem.writeInt(u128, buf[0..16], ctr, .big);
   // RIGHT: one byte swap + one unaligned store
   @as(*align(1) u128, @ptrCast(buf[0..16])).* = std.mem.nativeToBig(u128, ctr);
@@ -260,8 +264,9 @@ strings, so the `.name` of a declaration entry goes) instead of `decls`, `error_
 - **0.17.0 only (fixed in 0.17.1): `@intCast` / `std.math.cast` from a signed integer to a
   narrower *unsigned* one is miscompiled in optimized builds (#37131).** On 0.17.1 the shape
   below returns 2 in every mode (run for this skill); a project that must still build with
-  0.17.0 needs the spelling below, one that requires 0.17.1 should say so in
-  `minimum_zig_version`. On 0.17.0 the
+  0.17.0 needs the spelling below; one that drops it must refuse 0.17.0 with a comptime
+  `builtin.zig_version` check (`minimum_zig_version` is not enforced by Zig; recipe in
+  zig-gotchas.md). On 0.17.0 the
   frontend emits LLVM `trunc nsw` (it should be `nuw`), so every value in the upper half of
   the destination range (`0x8000_0000..0xFFFF_FFFF` for `u32`) is poison and LLVM may delete
   any check that depends on it. Debug is unaffected, so the tests pass there. Whether an
@@ -516,7 +521,8 @@ run_cmd.addPassthruArgs();   // forwards `zig build run -- a b c`
    `readInt`/`writeInt` with an explicit endianness) — see "Silent changes".
    Move to 0.17.1, not 0.17.0: 0.17.0 miscompiles every signed-to-narrower-unsigned
    `@intCast`/`std.math.cast` in optimized builds (see "Silent changes", #37131), and the tests
-   pass in Debug. Set `.minimum_zig_version = "0.17.1"`. Run the suite in an optimized mode too.
+   pass in Debug. Set `.minimum_zig_version = "0.17.1"` (advisory only; a library that relies on
+   0.17.1 adds the comptime version check from zig-gotchas.md). Run the suite in an optimized mode too.
    A hot `[N]u8` <-> wider-lane vector or >= 16-byte integer `@bitCast` (not `[4]u8`<->`u32` / `[8]u8`<->`u64`, a single load) also became a byte loop: route it through
    `@Vector(N, u8)` (see zig-gotchas.md, "byte array and wider lanes").
 5. Re-measure: constant-time checks and benchmarks (LLVM 22); anything that pins source text
@@ -1382,7 +1388,7 @@ Load these references when working with specific modules:
 - **[Zig Patterns](references/patterns.md)** - **Load when writing new code or reviewing code quality.** Comprehensive best practices extracted from the Zig standard library: quick patterns (memory/allocators, file I/O, HTTP, JSON, testing, build system) plus idiomatic code patterns covering syntax (closures, context pattern, options structs, destructuring), polymorphism (duck typing, generics, custom formatting, dynamic/static dispatch), safety (diagnostics, error payloads, defer/errdefer, compile-time assertions), and performance (const pointer passing)
 - **[Production Patterns](references/production-patterns.md)** - **Load when building large-scale Zig systems or optimizing performance.** Real-world patterns from Bun, Ghostty, TigerBeetle: modular build systems, CPU feature locking, pre-allocated message pools, counting allocators, SIMD with scalar fallback, intrusive linked lists, cache-line aligned SoA, work-stealing thread pools, SmolStr (15-byte SSO), comptime string maps, EnumUnionType generation, VOPR fuzzing, snapshot testing, edge-biased fuzz generation, platform abstraction facades, Objective-C bridges, opaque C wrappers with RAII, packed struct bitfields, Result union types, radix sort, tournament trees
 - **[MCP Server Patterns](references/mcp-server-patterns.md)** - **Load when building MCP servers, LSP bridges, JSON-RPC services, or protocol translators in Zig.** Patterns from zig-mcp: newline-delimited vs Content-Length transport, thread-based request correlation with ResetEvent, arena-per-request memory, child process lifecycle with pipe ownership transfer, tool registry with function pointers, std.json.Stringify for manual JSON building, lazy document sync with double-check locking, graceful degradation, auto-reconnect on crash, comptime schema generation, file URI encoding, common serialization gotchas
-- **[Gotchas](references/zig-gotchas.md)** - **Load when debugging code that compiles but misbehaves, or before a release.** Traps found in production code, each with its 0.17.0 status: what 0.17 changed silently (@bitCast arrays, @hasDecl, containsAtLeastScalar, SafeAllocator RSS), tuple swap, generic struct identity, @intFromFloat range, a pointer into a by-value parameter, cancellation behind Io.Reader, a custom Io.Reader with only `stream` (one call per small read), fiber contextSwitch, fuzz corpus length prefix, self-hosted vs LLVM backend, allocRemaining limit, a struct holding a slice into its own field, byte-loop array/vector @bitCast, HashMap tombstones, byte-loop memcmp/secureZero, std.mem.find over secrets (Boyer-Moore-Horspool), ecdsa SecretKey.fromBytes without a range check, key schedules on the stack, build.zig.zon facts
+- **[Gotchas](references/zig-gotchas.md)** - **Load when debugging code that compiles but misbehaves, or before a release.** Traps found in production code, each with its 0.17 status (0.17.0-only ones marked fixed in 0.17.1): what 0.17 changed silently (@bitCast arrays, @hasDecl, containsAtLeastScalar, SafeAllocator RSS), tuple swap, generic struct identity, @intFromFloat range, a pointer into a by-value parameter, cancellation behind Io.Reader, a custom Io.Reader with only `stream` (one call per small read), fiber contextSwitch, fuzz corpus length prefix, self-hosted vs LLVM backend, allocRemaining limit, a struct holding a slice into its own field, byte-loop array/vector @bitCast, HashMap tombstones, byte-loop memcmp/secureZero, std.mem.find over secrets (Boyer-Moore-Horspool), ecdsa SecretKey.fromBytes without a range check, key schedules on the stack, build.zig.zon facts
 - **[Code Review](references/code-review.md)** - **Load when reviewing Zig code.** Systematic checklist organized by confidence level: ALWAYS FLAG (removed features, changed syntax, API changes), FLAG WITH CONTEXT (exception safety bugs, missing flush, allocator issues), SUGGEST (style improvements). Includes migration examples for 0.14/0.15 breaking changes
 
 ### Serialization

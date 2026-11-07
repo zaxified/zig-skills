@@ -39,11 +39,14 @@ inherits the live environment. Measured on 0.17.0 and again on 0.17.1 with three
 // WRONG (0.17): BENCH_ROUNDS=5 zig build bench still runs with the old BENCH_ROUNDS
 const run = b.addRunArtifact(bench);
 run.setEnvironmentVariable("BENCH_FAST", "1");
-// RIGHT: set the variable through env(1) and keep the step's env map untouched
+// RIGHT on POSIX hosts: set the variable through env(1) and keep the step's env map untouched
 const run2 = b.addSystemCommand(&.{ "env", "BENCH_FAST=1" });
 run2.addArtifactArg(bench);
 ```
-Or make the value a `-D` option and pass it as an argument.
+The portable choice is a `-D` option compiled in with `b.addOptions()` or passed as an argument;
+`env` needs a POSIX `env` binary (not on Windows). The `env` step sees the live environment only
+because it runs every time (inherited stdio, no output arguments): a variant that captures output
+or uses `.check` is cached and ignores the environment, as the next paragraph explains.
 
 **The run step's own cache key has no environment either.** A Run step without side effects
 (every `addRunArtifact` of a test) is skipped when its inputs are unchanged, whatever the
@@ -56,12 +59,24 @@ by a `-D` option: compile the value in through `b.addOptions()` (it is then part
 let the option set `run.has_side_effects = true` so the step runs every time it is requested.
 
 ### 0.17.0 only: signed to narrower unsigned `@intCast` / `std.math.cast` is poison in optimized builds (#37131)
-**Fixed in 0.17.1** (#37127, fix `ee65c2b` "llvm: pass source and destination signedness to
+(Issue #37127, fix PR #37131; the skill uses the PR number throughout, as the 0.17 notes did.)
+**Fixed in 0.17.1** (fix `ee65c2b` "llvm: pass source and destination signedness to
 WipFunction.conv"): on 0.17.1 the `checkG` reproducer at the end of this section returns 2 in Debug, ReleaseSafe and
 ReleaseFast; on 0.17.0 it returns 0 in ReleaseSafe and ReleaseFast (both run for this skill).
-A project that must still build with 0.17.0 keeps the workarounds below; one that can require
-0.17.1 sets `.minimum_zig_version = "0.17.1"` in `build.zig.zon` (so a consumer on 0.17.0 does
-not silently get the miscompile) and may drop them.
+A project that must still build with 0.17.0 keeps the workarounds below. **`minimum_zig_version`
+in `build.zig.zon` does not protect anyone:** Zig only parses it (`Maker/Package/Manifest.zig`) and
+never compares it with its own version — a project declaring `"0.17.1"` built with 0.17.0
+without a word (run for this skill). A package that drops the workarounds must refuse 0.17.0
+itself, in its root module (refused the build on 0.17.0 and passed on 0.17.1, run for this skill):
+```zig
+const builtin = @import("builtin");
+// Zig 0.17.0 miscompiles signed -> narrower unsigned @intCast (#37131); minimum_zig_version is not enforced
+comptime {
+    if (builtin.zig_version.order(.{ .major = 0, .minor = 17, .patch = 1 }) == .lt)
+        @compileError("this package requires Zig 0.17.1 or later (#37131)");
+}
+```
+Keep `minimum_zig_version = "0.17.1"` as well: version managers (anyzig) and readers use it.
 
 Present in 0.17.0 (0.16 emitted a plain `trunc`). The frontend lowers a cast from a
 **signed** integer to a **narrower unsigned** one to LLVM `trunc nsw`; for an unsigned
@@ -149,7 +164,7 @@ caller sees as a value: the `if (f()) |v|` branch runs with a zeroed payload. x8
 affected. Found as a key decoder that accepted every malformed key on arm64 CI only.
 ```zig
 const S = struct { v: [4]@Vector(16, i16), h: [32]u8, flag: bool };              // 176 bytes
-noinline fn f() error{Bad}!S { return error.Bad; }          // WRONG (0.17): aarch64 caller gets a value
+noinline fn f() error{Bad}!S { return error.Bad; }          // WRONG on 0.17.0 only (fixed in 0.17.1, ebed931): aarch64 caller gets a value
 const SA = struct { v: [4]@Vector(16, i16) align(32), h: [32]u8, flag: bool };   // 192 bytes
 noinline fn g() error{Bad}!SA { return error.Bad; }         // the error arrives
 ```
@@ -745,7 +760,8 @@ and a needle longer than 4, `find`/`findPos` use Boyer-Moore-Horspool. The loop 
 `skip_table[haystack[i + needle.len - 1]]`, an index taken from the haystack byte, and how
 far it skips depends on whether that byte occurs in the needle. Searching for
 `-----END PRIVATE KEY-----` forward through a PEM body leaks the base64 key that way, and a
-constant-time tester (ctgrind) flags it. Shorter needles take `findPosLinear`, which exits
+constant-time tester (ctgrind) flags it (BMH also needs an element type with a unique
+representation). Shorter needles take `findPosLinear` (a one-element needle `findScalarPos`), which exits
 early on the first mismatch, so that is no help for secrets either. Over text that holds a secret, scan
 for a byte the secret's alphabet cannot contain (`std.mem.findScalarPos(u8, text, start, '-')`
 for base64, then `std.mem.startsWith`) instead of searching for the whole line.
@@ -935,7 +951,8 @@ fetches), or ask the user before changing their environment.
 
 Mapped from the 0.17.0..0.17.1 commit list (209 commits) and the issue tracker. **Per the
 commit message, not reproduced here** unless a row says "run". On 0.17.0 each row is a live
-bug; requiring 0.17.1 (`minimum_zig_version`) removes all of the first table.
+bug; requiring 0.17.1 (the comptime `builtin.zig_version` check in the #37131 section —
+`minimum_zig_version` alone is not enforced) removes all of the first table.
 
 Fixed in 0.17.1:
 
@@ -954,16 +971,16 @@ Fixed in 0.17.1:
 | `a4695d4` | Coercing an untyped `&.{}` to an empty slice crashes the compiler |
 | `026e105` (#31677) | `zig build --fork=<dir>` with two or more matching packages always fails |
 | `0be75fc` | Maker: stack use-after-free of `dynamic_linker_path` (random crash with `-Ddynamic-linker`) |
-| `07590f2` | Lazy dependencies that a step needs are fetched and the configuration retried |
+| `07590f2` | A lazy dependency needed only by an artifact or path lookup is not fetched, and configuration fails |
 | `e63e88c` | `--watch` did not add directories to the watch list |
 | `bf93660` | `stack_protector` is not part of the cache key: stale objects after toggling it |
-| `a81a808` | `@shrExact` does not emit `shr_exact` under safety |
+| `a81a808` | `@shrExact` emitted LLVM `shr_exact` even with safety on, so the exactness check could be optimized away |
 | `388c02e`, `c629ee4` | `Io.net` control-message (cmsg) alignment; `Stream` read after control data |
 | `46173d2`, `a6dddfa` | `Io.net`: IPv6 with an IPv4 tail; `Ip4Address.fromAny` returns `?Ip4Address` |
 | `4428d52`, `975d74f` | `Io.Threaded`: `renamePreserve` on kernels without `renameat2` flags; EACCES on file reads |
 | `a4b8ba9` | `std.Io` writer spins on flush when the underlying io keeps failing |
 | `15c1d31` | `std.http` request bodies: POST with an empty body, `discardBody`, bodies on GET/DELETE/OPTIONS |
-| `c6044e6` | `base64` decoded-size upper bound wrong |
+| `c6044e6` | `std.crypto.codecs.base64` `decodedLenUpperBound` over-estimates (wasteful, not unsafe; `std.base64` is unchanged) |
 | `4465f34`, `57e52b7` | `aes_siv` with empty input; `sha3.TupleHashXOF` output length |
 | `eb4b3eb` | `HashMap.removeByPtr` does not compile |
 | `1bb9a9d` | `std.os.linux.sigdelset` toggles the bit instead of clearing it |

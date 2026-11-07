@@ -551,9 +551,9 @@ const Method = enum {
     // Since 0.17.1 std.http itself no longer consults these two (see top of file)
     pub fn requestHasBody(m: Method) bool;   // POST, PUT, PATCH, QUERY
     pub fn responseHasBody(m: Method) bool;  // GET, POST, PUT, DELETE, CONNECT, OPTIONS, PATCH, QUERY
-    pub fn safe(m: Method) bool;             // GET, HEAD, OPTIONS, TRACE
-    pub fn idempotent(m: Method) bool;       // GET, HEAD, PUT, DELETE, OPTIONS, TRACE
-    pub fn cacheable(m: Method) bool;        // GET, HEAD
+    pub fn safe(m: Method) bool;             // GET, HEAD, OPTIONS, TRACE, QUERY
+    pub fn idempotent(m: Method) bool;       // GET, HEAD, PUT, DELETE, OPTIONS, TRACE, QUERY
+    pub fn cacheable(m: Method) bool;        // GET, HEAD, QUERY
 };
 ```
 
