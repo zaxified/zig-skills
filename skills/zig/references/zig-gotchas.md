@@ -769,8 +769,8 @@ for base64, then `std.mem.startsWith`) instead of searching for the whole line.
 ### `ecdsa` `SecretKey.fromBytes` accepts any 32 bytes
 
 Read from the 0.17.0 source (`crypto/ecdsa.zig`): `SecretKey.fromBytes` stores the bytes as
-given, and `KeyPair.fromSecretKey` multiplies the base point by them without checking the
-range, so a key of n or larger loads and acts as `d mod n`. A zero key is rejected by
+given, and `KeyPair.fromSecretKey` multiplies the base point by them; neither rejects a value
+outside the scalar range, so a key of n or larger loads and acts as `d mod n`. A zero key is rejected by
 `fromSecretKey` itself (`basePoint.mul` returns `error.IdentityElement`). Check a key read from outside yourself:
 
 ```zig
