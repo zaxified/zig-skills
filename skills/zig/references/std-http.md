@@ -17,8 +17,8 @@ no longer consulted; only `HEAD` is special). On 0.17.0 the server ignored a bod
 `Transfer-Encoding` has no body (RFC 7230). The client
 returns a connection to the pool only after the request body was ended (`BodyWriter.end`), so an
 unframed request no longer poisons the pool. A hand-built `std.http.Reader` needs the new
-required field `side` (`.request` for a reader over a client's request, `.response` for a
-server's response): code that fills the struct itself stops compiling, loudly.
+required field `side` (`.request` for the server-side reader, which reads requests;
+`.response` for the client-side reader, which reads responses): code that fills the struct itself stops compiling, loudly.
 
 ## Table of Contents
 - [HTTP Client](#http-client)
@@ -546,10 +546,11 @@ try ws.flush();
 
 ```zig
 const Method = enum {
-    GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH,
+    GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH, QUERY,
 
-    pub fn requestHasBody(m: Method) bool;   // POST, PUT, PATCH
-    pub fn responseHasBody(m: Method) bool;  // GET, POST, DELETE, CONNECT, OPTIONS, PATCH
+    // Since 0.17.1 std.http itself no longer consults these two (see top of file)
+    pub fn requestHasBody(m: Method) bool;   // POST, PUT, PATCH, QUERY
+    pub fn responseHasBody(m: Method) bool;  // GET, POST, PUT, DELETE, CONNECT, OPTIONS, PATCH, QUERY
     pub fn safe(m: Method) bool;             // GET, HEAD, OPTIONS, TRACE
     pub fn idempotent(m: Method) bool;       // GET, HEAD, PUT, DELETE, OPTIONS, TRACE
     pub fn cacheable(m: Method) bool;        // GET, HEAD

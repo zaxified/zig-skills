@@ -32,7 +32,7 @@ forced with `zig build --cache-poison=poisoned`.
 (or `getEnvMap`) copies the whole configure-time environment into the step, and that copy is
 part of the cached configuration: the command then sees the variables of the last configurer
 run, not of the shell that started `zig build`. A Run step that never touches its env map
-inherits the live environment. Measured on 0.17.0 with three always-running steps that print
+inherits the live environment. Measured on 0.17.0 and again on 0.17.1 with three always-running steps that print
 `$B`, run with `B=one` and then `B=two`: the step with `setEnvironmentVariable("A", "1")` printed
 `one` both times; the untouched step and the `env` form printed `two`.
 ```zig
@@ -49,7 +49,7 @@ Or make the value a `-D` option and pass it as an argument.
 (every `addRunArtifact` of a test) is skipped when its inputs are unchanged, whatever the
 environment says: `X=1 zig build test` ran the test, `X=2 zig build test` right after printed
 `run test cached` and `Build Summary: 3/3 steps succeeded` with no `N/N tests passed` (measured
-on 0.17.0). The same applies to anything else outside the key, such as the network namespace
+on 0.17.0, same on 0.17.1). The same applies to anything else outside the key, such as the network namespace
 (`unshare -rn zig build test`). A summary without a test count means nothing ran. A test that
 reads an environment variable (a fuzz iteration count, a live-network switch) is better served
 by a `-D` option: compile the value in through `b.addOptions()` (it is then part of the key), or
@@ -57,7 +57,7 @@ let the option set `run.has_side_effects = true` so the step runs every time it 
 
 ### 0.17.0 only: signed to narrower unsigned `@intCast` / `std.math.cast` is poison in optimized builds (#37131)
 **Fixed in 0.17.1** (#37127, fix `ee65c2b` "llvm: pass source and destination signedness to
-WipFunction.conv"): on 0.17.1 the `r4` probe below returns 2 in Debug, ReleaseSafe and
+WipFunction.conv"): on 0.17.1 the `checkG` reproducer at the end of this section returns 2 in Debug, ReleaseSafe and
 ReleaseFast; on 0.17.0 it returns 0 in ReleaseSafe and ReleaseFast (both run for this skill).
 A project that must still build with 0.17.0 keeps the workarounds below; one that can require
 0.17.1 sets `.minimum_zig_version = "0.17.1"` in `build.zig.zon` (so a consumer on 0.17.0 does
@@ -71,7 +71,7 @@ not show it. It does not depend on the target (a migration saw it on x86_64 and 
 fully defined by the language when the value was checked to fit first.
 
 ```zig
-// WRONG (0.17): the range check below is folded away in ReleaseSafe/ReleaseFast
+// WRONG on 0.17.0 only (fixed in 0.17.1): the range check below is folded away in ReleaseSafe/ReleaseFast
 noinline fn f(eb: i64) u32 {
     if (eb < 0 or eb > 0xFFFF_FFFF) return 1;
     const v: u32 = @intCast(eb);      // std.math.cast(u32, eb) emits the same `trunc nsw`
@@ -754,8 +754,8 @@ for base64, then `std.mem.startsWith`) instead of searching for the whole line.
 
 Read from the 0.17.0 source (`crypto/ecdsa.zig`): `SecretKey.fromBytes` stores the bytes as
 given, and `KeyPair.fromSecretKey` multiplies the base point by them without checking the
-range, so a key of n or larger loads and acts as `d mod n`. A zero key fails only later, at
-the identity check. Check a key read from outside yourself:
+range, so a key of n or larger loads and acts as `d mod n`. A zero key is rejected by
+`fromSecretKey` itself (`basePoint.mul` returns `error.IdentityElement`). Check a key read from outside yourself:
 
 ```zig
 const Ecdsa = std.crypto.sign.ecdsa.EcdsaP256Sha256;
@@ -970,7 +970,7 @@ Fixed in 0.17.1:
 | `35d8e63`, `0617b16` | `zon.parse.fromZoir*` ignores the `node` option; `Diagnostics` output had a trailing newline |
 | `d3b1f18` | mips `syscall4` and up lack the `$a3` output |
 | `332668c` (#37006) | soft-float compiler-rt on x86 (issue closed in the 0.17.1 milestone; commit matched by title) |
-| SPIR-V commits (#37050) | SPIR-V backend regression |
+| `44dce00`, `98b5def`, `c1bde1d`, `3c8e94f` (#37050) | SPIR-V backend regression (the PR's commits, matched by the issue tracker) |
 
 Still open after 0.17.1 (keep the workarounds):
 
@@ -980,4 +980,4 @@ Still open after 0.17.1 (keep the workarounds):
 | #36969 | `SmpAllocator` growth (std-allocators.md) |
 | #35724 | Inline asm with one register as input, output and clobber miscompiles (`std.Io.fiber.contextSwitch`, see above) |
 | #36444 | Response files in `std.Build.Step.Run` (milestone 0.18.0) |
-| #36986 | Strong exports overriding weak ones: partly fixed by `5aef08a` (LLVM + ELF); C backend and the self-hosted WASM/Mach-O linkers still affected |
+| #36986 | Strong exports overriding weak ones: partly fixed by `5aef08a` (LLVM + ELF); per the issue tracker the C backend and the self-hosted WASM/Mach-O linkers are still affected |

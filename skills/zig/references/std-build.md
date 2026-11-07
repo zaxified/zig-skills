@@ -1143,8 +1143,8 @@ zig build --prefix-exe-dir=sbin
 
 0.17.1 (`17cf964`) separates where the build writes from where the files will live: the
 `install_*` path bases are `$DESTDIR` + the prefix, and the new `deployed_prefix`,
-`deployed_lib`, `deployed_bin`, `deployed_include` bases (`std.Build.Configuration.Path.Base`,
-used through `LazyPath.relative`) are the paths on the target system, unaffected by `$DESTDIR`.
+`deployed_lib`, `deployed_bin`, `deployed_include` bases (`std.Build.Configuration.LazyPath.Relative.Base`;
+`b.graph.path(.deployed_lib, "foo.pc")` or `.{ .relative = .{ .base = .deployed_lib, .sub_path = "foo.pc" } }`) are the paths on the target system, unaffected by `$DESTDIR`.
 They exist for files that must embed absolute install paths (a pkg-config `.pc` file); avoid
 embedding absolute paths otherwise. The configure phase cannot depend on either kind (it
 panics). Read from the 0.17.1 source, not run for this skill.

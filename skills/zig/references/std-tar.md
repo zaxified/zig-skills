@@ -1,6 +1,6 @@
 # std.tar - Tar Archive API Reference
 
-Tar archive reading and writing in Zig 0.17.0. Supports POSIX ustar, GNU extensions for long names, and pax extended headers.
+Tar archive reading and writing in Zig 0.17.1. Supports POSIX ustar, GNU extensions for long names, and pax extended headers.
 
 ## Table of Contents
 - [Module Structure](#module-structure)

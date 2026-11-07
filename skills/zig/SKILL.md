@@ -102,7 +102,9 @@ Replacing `**` mechanically (all forms below compiled and ran on 0.17.0):
   (Run on 0.17.0 in Debug, ReleaseSafe and ReleaseFast: `"x" ++ strRepeat("ab", 3) ++ "y"`
   returned from a `noinline fn` and read after a stack clobber, the sentinel, `n = 0`, an empty
   `s`, 1000 copies, and the `inline for (msgs)` shape below; also in ReleaseSafe on s390x under
-  qemu.)
+  qemu. The sentinel of uniform strings such as `strRepeat("a", 100)`, the case `b23c07e` fixed
+  for other comptime arrays, read through a `noinline` function: present on 0.17.0 and 0.17.1
+  in all three modes.)
   Write it as `const r = comptime blk: { ...; break :blk f; }; return &r;`, not as
   `comptime { ...; return &f; }`: the latter fails ("function called at runtime cannot return
   value at comptime") when the helper is called from a runtime scope (probe-verified in a
@@ -485,7 +487,7 @@ run_cmd.addPassthruArgs();   // forwards `zig build run -- a b c`
    compile it in your own `build.zig` and translate its header with `b.addTranslateC` (see
    "@cImport is removed" above). From that migration (builds and passes its tests on 0.17.0):
    ```zig
-   // build.zig.zon: .sqlite = .{ .url = "https://www.sqlite.org/2025/sqlite-amalgamation-3490200.zip", .hash = … }
+   // build.zig.zon: .sqlite = .{ .url = "https://www.sqlite.org/2025/sqlite-amalgamation-3490200.zip", .hash = … } (the hash `zig fetch --save` prints)
    const amalgamation = b.dependency("sqlite", .{}).path(""); // a plain archive, no build.zig
    const header = b.addTranslateC(.{               // translate the archive's header, never a system one
        .root_source_file = amalgamation.path(b, "sqlite3.h"),

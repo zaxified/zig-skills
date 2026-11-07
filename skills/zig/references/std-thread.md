@@ -1,6 +1,6 @@
 # std.Thread - Threading and Concurrency API Reference (0.17.1; "0.16" marks what changed in 0.16)
 
-Thread spawning and synchronization in Zig 0.17.0.
+Thread spawning and synchronization in Zig 0.17.1.
 
 ## Critical: Sync Primitives Removed From std.Thread (0.16)
 

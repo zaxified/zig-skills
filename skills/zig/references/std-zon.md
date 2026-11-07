@@ -1,6 +1,6 @@
 # std.zon - ZON Parsing and Serialization
 
-ZON ("Zig Object Notation") parsing and stringification in Zig 0.17.0. ZON's grammar is a subset of Zig's syntax.
+ZON ("Zig Object Notation") parsing and stringification in Zig 0.17.1. ZON's grammar is a subset of Zig's syntax.
 
 ## Table of Contents
 - [ZON Format Overview](#zon-format-overview)

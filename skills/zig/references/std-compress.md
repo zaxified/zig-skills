@@ -1,6 +1,6 @@
 # std.compress - Compression API Reference
 
-Compression and decompression algorithms in Zig 0.17.0. Supports DEFLATE (gzip, zlib), LZMA, LZMA2, XZ, and Zstandard.
+Compression and decompression algorithms in Zig 0.17.1. Supports DEFLATE (gzip, zlib), LZMA, LZMA2, XZ, and Zstandard.
 
 ## Table of Contents
 - [Module Structure](#module-structure)
