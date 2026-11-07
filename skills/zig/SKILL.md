@@ -81,22 +81,26 @@ Replacing `**` mechanically (all forms below compiled and ran on 0.17.0):
   drop the `comptime` (error: "redundant comptime keyword in already comptime scope").
 - String repetition (`"ab" ** 3`, `line ** n` with a comptime `line`) has no builtin: use a
   comptime helper, and **declare it `inline fn`**. Assign the result from a `comptime` block and
-  return a pointer to that constant, and give the loop an eval quota that scales with the work —
-  `n * (s.len + 4) + 1000` (one migration saw `evaluation exceeded 3002 backwards branches` with
-  `n * 2 + 1000` at n = 998, which an isolated probe did not reproduce, so do not tune the quota
-  down):
+  return a pointer to that constant. Build it with `@splat` of rows plus a `@bitCast`, not with a
+  loop that copies into an array `var`: such a loop costs quadratic compile time (see
+  zig-gotchas.md, "A comptime loop that writes into an array `var` is quadratic"; the loop
+  version took 3.9 / 14.7 / 66 s of Sema for n = 10k / 20k / 40k copies of `"abc"`, this one
+  0.05 / 0.07 / 0.09 s, Zig 0.17.0; the same on 0.16.0, so this is old, the removal of `**` just
+  makes people write the loop). It needs no eval quota:
   ```zig
   inline fn strRepeat(comptime s: []const u8, comptime n: usize) *const [s.len * n:0]u8 {
       const rep_result = comptime blk: {
-          @setEvalBranchQuota(n * (s.len + 4) + 1000);
-          var buf: [s.len * n:0]u8 = undefined;
-          for (0..n) |i| @memcpy(buf[i * s.len ..][0..s.len], s);
-          const rep_final = buf;
-          break :blk rep_final;
+          const rows: [n][s.len]u8 = @splat(s[0..s.len].*);
+          const flat: [s.len * n]u8 = @bitCast(rows);
+          break :blk flat ++ [_:0]u8{};
       };
       return &rep_result;
   }
   ```
+  (Run on 0.17.0 in Debug, ReleaseSafe and ReleaseFast: `"x" ++ strRepeat("ab", 3) ++ "y"`
+  returned from a `noinline fn` and read after a stack clobber, the sentinel, `n = 0`, an empty
+  `s`, 1000 copies, and the `inline for (msgs)` shape below; also in ReleaseSafe on s390x under
+  qemu.)
   Write it as `const r = comptime blk: { ...; break :blk f; }; return &r;`, not as
   `comptime { ...; return &f; }`: the latter fails ("function called at runtime cannot return
   value at comptime") when the helper is called from a runtime scope (probe-verified in a
@@ -124,8 +128,11 @@ Replacing `**` mechanically (all forms below compiled and ran on 0.17.0):
   (seen on an array of structs): grep the result for `\[[0-9]+\]u8, @splat\([a-z]` and check
   each hit's real element type.
 - Multi-element arrays (`[_]T{ a, b } ** N`): the same shape without the sentinel,
-  `fn arrRepeat(comptime T: type, comptime unit: []const T, comptime n: usize) [unit.len * n]T`
-  (a plain function with `@setEvalBranchQuota` and a `@memcpy` loop).
+  `fn arrRepeat(comptime T: type, comptime unit: []const T, comptime n: usize) [unit.len * n]T`.
+  For integer or float elements use the `@splat`-rows-and-`@bitCast` body above; a
+  `@memcpy` loop with `@setEvalBranchQuota` works for any `T` but is quadratic in compile time,
+  so keep it for short results. (The `@splat` form was run on 0.17.0 with `u16` and `f32` units in
+  Debug and ReleaseFast, and on s390x under qemu.)
 - Watch for `@typeInfo(X).@"enum".fields.len` used as the length: it is now
   `.field_names.len`, e.g. `var seen: [@typeInfo(E).@"enum".field_names.len]bool = @splat(false);`
   (a mechanical rewrite that wraps `@splat(false)` in `@as([@typeInfo(E)]bool, …)` yields invalid code).

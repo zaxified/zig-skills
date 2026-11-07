@@ -27,6 +27,33 @@ b.graph.poisonCache(); // configuration now reruns on every zig build
 `b.findProgram` poisons the cache itself; `b.findProgramLazy` does not. One stale run can be
 forced with `zig build --cache-poison=poisoned`.
 
+**`Run.setEnvironmentVariable` freezes the environment of the run as well.** The first call
+(or `getEnvMap`) copies the whole configure-time environment into the step, and that copy is
+part of the cached configuration: the command then sees the variables of the last configurer
+run, not of the shell that started `zig build`. A Run step that never touches its env map
+inherits the live environment. Measured on 0.17.0 with three always-running steps that print
+`$B`, run with `B=one` and then `B=two`: the step with `setEnvironmentVariable("A", "1")` printed
+`one` both times; the untouched step and the `env` form printed `two`.
+```zig
+// WRONG (0.17): BENCH_ROUNDS=5 zig build bench still runs with the old BENCH_ROUNDS
+const run = b.addRunArtifact(bench);
+run.setEnvironmentVariable("BENCH_FAST", "1");
+// RIGHT: set the variable through env(1) and keep the step's env map untouched
+const run2 = b.addSystemCommand(&.{ "env", "BENCH_FAST=1" });
+run2.addArtifactArg(bench);
+```
+Or make the value a `-D` option and pass it as an argument.
+
+**The run step's own cache key has no environment either.** A Run step without side effects
+(every `addRunArtifact` of a test) is skipped when its inputs are unchanged, whatever the
+environment says: `X=1 zig build test` ran the test, `X=2 zig build test` right after printed
+`run test cached` and `Build Summary: 3/3 steps succeeded` with no `N/N tests passed` (measured
+on 0.17.0). The same applies to anything else outside the key, such as the network namespace
+(`unshare -rn zig build test`). A summary without a test count means nothing ran. A test that
+reads an environment variable (a fuzz iteration count, a live-network switch) is better served
+by a `-D` option: compile the value in through `b.addOptions()` (it is then part of the key), or
+let the option set `run.has_side_effects = true` so the step runs every time it is requested.
+
 ### Signed to narrower unsigned `@intCast` / `std.math.cast` is poison in optimized builds (#37131)
 Open compiler issue #37131 (a fix PR was open and unmerged on 2026-10-18), present in 0.17.0 (0.16 emitted a plain `trunc`). The frontend lowers a cast from a
 **signed** integer to a **narrower unsigned** one to LLVM `trunc nsw`; for an unsigned
@@ -91,6 +118,38 @@ fields from a `Value` (`parseFromValue`) or from a float-formatted number such a
 `-femit-llvm-ir` is enough: the classification does not depend on the mode) for a `trunc nsw`
 whose source is bounded below by `icmp sge x, 0`; an unsigned destination with an `nsw` trunc is
 this bug. Remove the workarounds once a release fixes it, and name the issue in their comment.
+
+### aarch64: an error union whose payload holds a 32-byte `@Vector` loses the error (#37110)
+On aarch64 (LLVM backend, Debug and optimized alike) a function returning `E!T`, where `T`
+contains a 32-byte vector and `@sizeOf(T)` is not a multiple of 32, can return an error that the
+caller sees as a value: the `if (f()) |v|` branch runs with a zeroed payload. x86_64 is not
+affected. Found as a key decoder that accepted every malformed key on arm64 CI only.
+```zig
+const S = struct { v: [4]@Vector(16, i16), h: [32]u8, flag: bool };              // 176 bytes
+noinline fn f() error{Bad}!S { return error.Bad; }          // WRONG (0.17): aarch64 caller gets a value
+const SA = struct { v: [4]@Vector(16, i16) align(32), h: [32]u8, flag: bool };   // 192 bytes
+noinline fn g() error{Bad}!SA { return error.Bad; }         // the error arrives
+```
+Run on 0.17.0 for this skill, `-target aarch64-linux` under `qemu-aarch64`, Debug and
+ReleaseSafe: `f` lost the error, `g` did not; both fine on x86_64. Earlier observations: 16-byte
+vectors and a 160-byte struct (a multiple of 32) were not affected. Workaround: `align(32)` on
+the field holding the vectors of any struct that can be an error-union or optional payload,
+directly or nested. Test such code for aarch64 (`-fqemu` or `--test-cmd qemu-aarch64
+--test-cmd-bin`); a native x86_64 run proves nothing here.
+
+### aarch64 with SVE: a syscall clears the predicate registers under the code's feet (#37321)
+The kernel zeroes the SVE predicate registers P0–P15 on every syscall, and the 0.17.0 std
+inline `svc` (`os/linux/aarch64.zig`) does not declare them clobbered. When the code is built for
+a CPU with SVE (`-mcpu=native` on Neoverse N2/V-series, Graviton 3/4, GitHub's arm64 runners),
+LLVM may set up a predicate (`ptrue p0.s`) before a loop that makes a syscall and keep using it
+after: a merging SVE instruction then leaves garbage in place. Seen in CI as an impossible
+value at random (`std.mem.count` returned a raw bit mask, which surfaced as an integer overflow
+in the caller), never under qemu, which does not clear the registers. Analysed from the
+generated assembly (0.17.0 put `ptrue p0.s` before the loop header, the 0.17.1 std puts it
+inside); not reproduced on SVE hardware for this skill. Workaround: build the aarch64 target
+without SVE, e.g. `-Dcpu=neoverse_n2-sve` / `-mcpu=neoverse_n2-sve` (no `z`/`p` registers for
+such code). An impossible, random value in arm64 vector code: read the SVE assembly before
+suspecting the module.
 
 ### `zig build` lost flags scripts use
 Measured ("unrecognized argument"): `--global-cache-dir` (use `ZIG_GLOBAL_CACHE_DIR`),
@@ -448,6 +507,33 @@ the fix both fail.
 
 ## Testing and fuzzing
 
+### A forked child that faults dies of SIGABRT, and `DebugAllocator` misses leaks in ReleaseFast
+A harness that classifies a child process by how it ended (a fuzz driver, a test shrinker, a
+"this input must crash" test) is misled twice:
+
+1. **Every fault becomes `SIGABRT`.** In Debug and ReleaseSafe std installs a handler for
+   SIGSEGV, SIGILL, SIGBUS and SIGFPE (`debug.zig` `attachSegfaultHandler`) that prints a trace
+   and calls `std.process.abort()`, so a segfault looks exactly like a panic. ReleaseFast installs
+   no handler and the real signal arrives. To see it in every mode, reset the handler in the
+   child before running the code under test:
+   ```zig
+   std.debug.updateSegfaultHandler(&.{
+       .handler = .{ .handler = std.posix.SIG.DFL },
+       .mask = std.posix.sigemptyset(),
+       .flags = 0,
+   });
+   ```
+2. **`DebugAllocator(.{}).deinit()` returns `.ok` for a leak in ReleaseFast**: leak detection
+   exists only with `.safety`, which defaults to `std.debug.runtime_safety`. `DebugAllocator` is
+   deprecated in 0.17; `SafeAllocator.deinit()` returns the leak count in every mode. A leak
+   detector still on `DebugAllocator` must set `.safety = true`.
+
+Run on 0.17.0 (same in 0.16.0 source): a forked child writing through a bad pointer ended with
+signal 6 in Debug and ReleaseSafe and 11 in ReleaseFast, and 11 in all three after the reset;
+one unfreed 10-byte allocation gave `leak` for `DebugAllocator(.{})` in Debug and ReleaseSafe
+and `ok` in ReleaseFast, `leak` with `.safety = true`, and a count of 1 from `SafeAllocator` in
+all three. Test such a harness in ReleaseFast as well.
+
 ### Fuzz corpus entries lose their first four bytes
 
 Still true in 0.17.0 (`Smith` decodes input the same way; the fuzzer did not change).
@@ -529,6 +615,19 @@ const tests = b.addTest(.{ .root_module = mod, .use_llvm = use_llvm });
 `use_llvm = true` changes nothing in Release modes, which use LLVM already.
 
 ## Performance
+
+### A comptime loop that writes into an array `var` is quadratic
+Each store into a comptime array `var` costs time proportional to the array, so filling a
+buffer element by element (or chunk by chunk with `@memcpy`) in a `comptime` block grows with the
+square of its length. Measured with the old string-repeat helper (`var buf: [3 * n:0]u8`, a
+`for (0..n)` `@memcpy` of `"abc"`), timing `-fno-emit-bin` so only Sema counts: n = 10k / 20k / 40k
+took 3.9 / 14.7 / 66 s on 0.17.0 (20k: 11.4 s on 0.16.0). The same result built from
+`@splat` of `[n][3]u8` rows plus a `@bitCast` to `[3 * n]u8` took 0.05 / 0.07 / 0.09 s. One
+project's test binary spent 323 of ~344 s of its compile in Sema on 22 such copies. Build
+comptime tables from whole values (`@splat`, `++`, a `@bitCast` of a nested array) instead of
+a store loop, and when one compile is slow, time `-fno-emit-bin` first to split Sema from code
+generation, then look for `@setEvalBranchQuota` next to a comptime loop. The `**` replacement
+recipe in SKILL.md uses the fast form.
 
 ### `std.HashMap` never rehashes away its tombstones
 

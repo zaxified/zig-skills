@@ -596,7 +596,10 @@ run_cmd.addArgs(&.{ "--config", "debug.json" });
 // Change working directory
 run_cmd.setCwd(b.path("data"));
 
-// Set environment variables
+// Set environment variables. The first call freezes the whole environment of this step at
+// configure time (cached): later shell variables never reach it. To keep the live
+// environment, use addSystemCommand(&.{ "env", "DEBUG=1" }) + addArtifactArg(exe) instead
+// (zig-gotchas.md, "The build configuration is cached on inputs it cannot see").
 run_cmd.setEnvironmentVariable("DEBUG", "1");
 
 // Create run step
