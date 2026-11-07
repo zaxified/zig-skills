@@ -1,9 +1,9 @@
 # zig-skills
 
-[![gate](https://github.com/zaxified/zig-skills/actions/workflows/gate.yml/badge.svg)](https://github.com/zaxified/zig-skills/actions/workflows/gate.yml) [![Zig 0.17.0](https://img.shields.io/badge/Zig-0.17.0-f7a41d)](https://ziglang.org/download/) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![gate](https://github.com/zaxified/zig-skills/actions/workflows/gate.yml/badge.svg)](https://github.com/zaxified/zig-skills/actions/workflows/gate.yml) [![Zig 0.17.1](https://img.shields.io/badge/Zig-0.17.1-f7a41d)](https://ziglang.org/download/) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Scanned by NVIDIA SkillSpector](https://img.shields.io/badge/scanned_by-NVIDIA_SkillSpector-76b900)](https://github.com/NVIDIA/SkillSpector) [![Audited releases](https://img.shields.io/badge/releases-audited-2ea44f)](audits/) [![Latest release](https://img.shields.io/github/v/tag/zaxified/zig-skills)](https://github.com/zaxified/zig-skills/tags)
 
-An agent skill for **Zig 0.17.0**: the current std and build-system APIs, migration notes
+An agent skill for **Zig 0.17.1**: the current std and build-system APIs, migration notes
 from 0.14 to 0.17, and gotchas found in production code. Every release is audited so that
 nothing in it can turn against the agent, or the person, using it.
 
@@ -12,12 +12,14 @@ Most model training data predates the 0.15 I/O rewrite, the 0.16 `std.Io` redesi
 `std.time.timestamp()`, `[_]u8{0} ** n`, `@typeInfo(T).@"struct".fields` or
 `std.heap.DebugAllocator` that no longer compile or are on their way out. The skill tells the
 agent what changed and what the 0.17 code looks like. In CI, every `std.*` path in its
-correct examples must exist in the released 0.17.0 standard library, every standalone
-example must compile, and no correct example may use a name the 0.17.0 std marks deprecated.
+correct examples must exist in the released 0.17.1 standard library, every standalone
+example must compile, and no correct example may use a name the 0.17.1 std marks deprecated.
+Projects still on 0.17.0 can use it too: the 0.17.0 bugs that 0.17.1 fixes are described
+with their workarounds.
 
 | Zig | Skill name | Branch | Tags |
 |---|---|---|---|
-| 0.17.x | `zig-0.17` | `main` | `v0.17.0-rN` |
+| 0.17.x | `zig-0.17` | `main` | `v0.17.1-rN` (0.17.0: `v0.17.0-r1..r5`) |
 | 0.16.x | `zig` | `release/0.16` | `v0.16.0-rN` |
 
 The names differ so both can be installed side by side; install the one matching the
@@ -31,7 +33,7 @@ project's `zig version`.
 - `skills/zig/references/`: one file per std module or topic (ArrayList, HashMap, Io, net,
   http, json, crypto, process, build, testing and fuzzing, comptime, C interop, SIMD,
   data-oriented design, quality tooling), a code-review checklist, and
-  `zig-gotchas.md`: traps that compile cleanly and are wrong, found on 0.16.0, each with its status on 0.17.0.
+  `zig-gotchas.md`: traps that compile cleanly and are wrong, found on 0.16.0 and 0.17, each with its status on 0.17.1.
 
 ## Why you can trust a release
 
@@ -55,7 +57,7 @@ your permissions. So a release has to clear five independent checks:
    harmless; any other finding fails the build. Workflows are checked by
    [zizmor](https://github.com/zizmorcore/zizmor) and
    [actionlint](https://github.com/rhysd/actionlint), each pinned by digest or checksum.
-3. **Correctness check** (CI, on the released Zig 0.17.0). Every `std.a.b.c` path in the
+3. **Correctness check** (CI, on the released Zig 0.17.1). Every `std.a.b.c` path in the
    correct examples must exist (`scripts/check-std-paths.py`), every standalone example must
    compile (`scripts/check-examples.py`), and no correct example may use a deprecated or
    removed name, read from the std itself (`scripts/check-deprecated.py`).
@@ -102,8 +104,8 @@ claude plugin install zig-skills@zig-skills
 ## Provenance and license
 
 Built on [nzrsky/zig-skills](https://github.com/nzrsky/zig-skills) (MIT), whose history this
-repository keeps. Since then: compile-verified 0.16.0 and 0.17.0 corrections, the gotchas
+repository keeps. Since then: compile-verified 0.16.0 and 0.17 corrections, the gotchas
 reference, the safety gate and the release audit. Upstream `main` targets an early 0.17-dev
-build; changes from it are taken selectively and verified against the released 0.17.0.
+build; changes from it are taken selectively and verified against the released 0.17.1.
 
 MIT, see [LICENSE](LICENSE).

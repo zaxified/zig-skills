@@ -1,8 +1,9 @@
-# Zig Gotchas (found in production code, checked on 0.17.0)
+# Zig Gotchas (found in production code, checked on 0.17.0, rechecked against 0.17.1)
 
 Traps that compile cleanly and look idiomatic, each found in real code and confirmed against
 the std source or by measurement. Most produce no error at all: the program runs and is
-wrong, slow, or leaks. They were found on 0.16.0; each entry says whether 0.17.0 still has it.
+wrong, slow, or leaks. They were found on 0.16.0 and 0.17.0; each entry says whether 0.17 still has it, and entries
+marked "0.17.0 only" are fixed in 0.17.1.
 
 ## New in 0.17.0
 
@@ -54,8 +55,15 @@ reads an environment variable (a fuzz iteration count, a live-network switch) is
 by a `-D` option: compile the value in through `b.addOptions()` (it is then part of the key), or
 let the option set `run.has_side_effects = true` so the step runs every time it is requested.
 
-### Signed to narrower unsigned `@intCast` / `std.math.cast` is poison in optimized builds (#37131)
-Open compiler issue #37131 (a fix PR was open and unmerged on 2026-10-18), present in 0.17.0 (0.16 emitted a plain `trunc`). The frontend lowers a cast from a
+### 0.17.0 only: signed to narrower unsigned `@intCast` / `std.math.cast` is poison in optimized builds (#37131)
+**Fixed in 0.17.1** (#37127, fix `ee65c2b` "llvm: pass source and destination signedness to
+WipFunction.conv"): on 0.17.1 the `r4` probe below returns 2 in Debug, ReleaseSafe and
+ReleaseFast; on 0.17.0 it returns 0 in ReleaseSafe and ReleaseFast (both run for this skill).
+A project that must still build with 0.17.0 keeps the workarounds below; one that can require
+0.17.1 sets `.minimum_zig_version = "0.17.1"` in `build.zig.zon` (so a consumer on 0.17.0 does
+not silently get the miscompile) and may drop them.
+
+Present in 0.17.0 (0.16 emitted a plain `trunc`). The frontend lowers a cast from a
 **signed** integer to a **narrower unsigned** one to LLVM `trunc nsw`; for an unsigned
 destination it should be `nuw`. `nsw` claims the value fits as a *signed* number, so every
 value in `[2^(N-1), 2^N)` is poison and LLVM may fold away whatever depends on it. Debug does
@@ -117,10 +125,25 @@ fields from a `Value` (`parseFromValue`) or from a float-formatted number such a
 (`math/ldexp.zig`). A tree-wide detector scans pre-optimization IR (Debug with
 `-femit-llvm-ir` is enough: the classification does not depend on the mode) for a `trunc nsw`
 whose source is bounded below by `icmp sge x, 0`; an unsigned destination with an `nsw` trunc is
-this bug. Remove the workarounds once a release fixes it, and name the issue in their comment.
+this bug. Name the issue in each workaround's comment so it can be found and removed once
+the project requires 0.17.1.
 
-### aarch64: an error union whose payload holds a 32-byte `@Vector` loses the error (#37110)
-On aarch64 (LLVM backend, Debug and optimized alike) a function returning `E!T`, where `T`
+The shortest reproducer, the one that tells the two versions apart (simple table tests and
+some `noinline` shapes do not fail even on 0.17.0):
+```zig
+export fn checkG(eb: i64) u32 {
+    if (eb < 0 or eb > 0xFFFF_FFFF) return 1;
+    const v: u32 = @intCast(eb);
+    if (v > 0x7FFF_FFFF) return 2;
+    return 0;
+}
+var input: i64 = 0xFFFF_FFFF;
+// in main: @call(.never_inline, checkG, .{@as(*const volatile i64, &input).*}) must be 2
+```
+
+### 0.17.0 only: aarch64 error union whose payload holds a 32-byte `@Vector` loses the error (#37110)
+**Fixed in 0.17.1** (`ebed931` "Type: fix vector size mismatch vs clang"; the probe below passes
+on 0.17.1 without `align(32)`, run under qemu for this skill). On 0.17.0, on aarch64 (LLVM backend, Debug and optimized alike) a function returning `E!T`, where `T`
 contains a 32-byte vector and `@sizeOf(T)` is not a multiple of 32, can return an error that the
 caller sees as a value: the `if (f()) |v|` branch runs with a zeroed payload. x86_64 is not
 affected. Found as a key decoder that accepted every malformed key on arm64 CI only.
@@ -130,15 +153,17 @@ noinline fn f() error{Bad}!S { return error.Bad; }          // WRONG (0.17): aar
 const SA = struct { v: [4]@Vector(16, i16) align(32), h: [32]u8, flag: bool };   // 192 bytes
 noinline fn g() error{Bad}!SA { return error.Bad; }         // the error arrives
 ```
-Run on 0.17.0 for this skill, `-target aarch64-linux` under `qemu-aarch64`, Debug and
-ReleaseSafe: `f` lost the error, `g` did not; both fine on x86_64. Earlier observations: 16-byte
+Run for this skill, `-target aarch64-linux` under `qemu-aarch64`: on 0.17.0 (Debug and
+ReleaseSafe) `f` lost the error, `g` did not; on 0.17.1 (ReleaseSafe) neither did; both fine on x86_64. Earlier observations: 16-byte
 vectors and a 160-byte struct (a multiple of 32) were not affected. Workaround: `align(32)` on
 the field holding the vectors of any struct that can be an error-union or optional payload,
 directly or nested. Test such code for aarch64 (`-fqemu` or `--test-cmd qemu-aarch64
 --test-cmd-bin`); a native x86_64 run proves nothing here.
 
-### aarch64 with SVE: a syscall clears the predicate registers under the code's feet (#37321)
-The kernel zeroes the SVE predicate registers P0–P15 on every syscall, and the 0.17.0 std
+### 0.17.0 only: aarch64 with SVE, a syscall clears the predicate registers under the code's feet (#37321)
+**Fixed in 0.17.1** (`3cc91ba`: the std `svc` wrappers in `os/linux/aarch64.zig` now declare
+P0–P15 and the Z registers clobbered when the target has SVE; riscv vector registers got the
+same treatment in `6e738b8`/`7f87e86`). On 0.17.0: the kernel zeroes the SVE predicate registers P0–P15 on every syscall, and the 0.17.0 std
 inline `svc` (`os/linux/aarch64.zig`) does not declare them clobbered. When the code is built for
 a CPU with SVE (`-mcpu=native` on Neoverse N2/V-series, Graviton 3/4, GitHub's arm64 runners),
 LLVM may set up a predicate (`ptrue p0.s`) before a loop that makes a syscall and keep using it
@@ -148,8 +173,8 @@ in the caller), never under qemu, which does not clear the registers. Analysed f
 generated assembly (0.17.0 put `ptrue p0.s` before the loop header, the 0.17.1 std puts it
 inside); not reproduced on SVE hardware for this skill. Workaround: build the aarch64 target
 without SVE, e.g. `-Dcpu=neoverse_n2-sve` / `-mcpu=neoverse_n2-sve` (no `z`/`p` registers for
-such code). An impossible, random value in arm64 vector code: read the SVE assembly before
-suspecting the module.
+such code), or require 0.17.1. An impossible, random value in arm64 vector code: read the SVE
+assembly before suspecting the module.
 
 ### `zig build` lost flags scripts use
 Measured ("unrecognized argument"): `--global-cache-dir` (use `ZIG_GLOBAL_CACHE_DIR`),
@@ -209,8 +234,9 @@ and `-OReleaseSafe` still work — keep the old spellings in scripts that must a
   length and slice at use, or let the caller own the buffer.
 
 ### Tooling
-- **ZLS does not work with 0.17.0** (the build runner it hooked into is gone). Editor
-  diagnostics stay empty or stale; compile to see errors.
+- **ZLS needs its 0.17.0 release** (2026-10-19; earlier ZLS cannot hook the 0.17 build
+  system). Even then package imports inside `build.zig` and modules exported only with
+  `b.addModule` may not resolve (ZLS release notes); compile to see the real errors.
 - **The first `zig build` after installing 0.17 compiles the maker** (measured twice:
   108 s and 115 s, Zig 0.17.0, x86_64 Linux, 8-core machine; once per toolchain and global cache). A fresh CI runner pays it on every job unless
   the global cache (`~/.cache/zig`) is cached; a CI script that gives every lane its own
@@ -253,10 +279,11 @@ and `-OReleaseSafe` still work — keep the old spellings in scripts that must a
   parses stack traces or valgrind frames and compares the whole path against `Writer.zig` or
   `foo.zig` matches nothing now: key on the basename, and require a `std/` directory when you
   mean the standard library.
-- **Known 0.17.0 regressions** (release notes): response files in `std.Build.Step.Run`
-  (#36444, a casualty of the configurer/maker split), `std.debug.simple_panic` does not
-  compile (#36986), weak symbols of Zig's libc cannot reliably be overridden, soft-float
-  compiler-rt on x86 (#37006), SPIR-V (#37050).
+- **Known 0.17.0 regressions** (release notes) and their state in 0.17.1: response files in
+  `std.Build.Step.Run` (#36444, a casualty of the configurer/maker split; still open),
+  `std.debug.simple_panic` does not compile (fixed, `327181a`), weak symbols of Zig's libc
+  cannot reliably be overridden (#36986, partly fixed), soft-float compiler-rt on x86 (#37006,
+  fixed), SPIR-V (#37050, fixed). Table at the end of this file.
 - **`std.Io.Uring` has no networking** (`netListenIp`, `netAccept`, `netConnectIp` return
   `…Unavailable`) and there is no epoll backend; network servers stay on `std.Io.Threaded`.
 - **`ArrayList` gained `pointer_stability`** (a `std.debug.SafetyLock`). A field-by-field
@@ -681,7 +708,7 @@ source. There are such contexts on 0.17.0 too: the window select is `cmov` ->
 `ct.select` per limb (`crypto/ff.zig` `cmov` and its use in `powWithEncodedExponentInternal`),
 which LLVM 22 unswitches into jumps (16 valgrind contexts in one ctgrind positive-control
 harness, ReleaseFast, 0.17.0; 0.16's `cmov(ct.eql)` select also compiled to jumps, but its context count for the same harness was not recorded).
-The 0.17.x length fix below does not make the window select constant-time.
+The 0.17.1 exponent-length fix (`12caf4e`, see "Known 0.17 library behaviour") does not make the window select constant-time; 0.17.1 does not touch it.
 
 ### std TLS does not check that an issuer is a CA: `std.http.Client` over https is open to a man in the middle
 
@@ -746,7 +773,7 @@ fn loadKey(bytes: [32]u8) !Ecdsa.KeyPair {
 
 Found on 0.16.0; not re-measured on 0.17.0. The AES-NI path did not change; on targets
 without AES hardware the software context is now bitsliced and several KB, so the residue
-is larger (see "Known 0.17.0 library behaviour").
+is larger (see "Known 0.17 library behaviour").
 
 After a TLS 1.3 handshake, the AES round keys (176-byte `AesEncryptCtx`, round key 0 is
 the raw key) were found at about ten places on the dead stack below the caller.
@@ -773,7 +800,7 @@ Checked on 0.16.0. In 0.17.0 fetched packages are also copied into `zig-pkg/` in
   without editing the manifest, which is safer than temporarily switching the pin to `.path`.
   With one matching package it works (run in a migration, six example apps). With two or more
   matching packages it fails on 0.17.0 according to #31677 and the fix commit's message
-  (`026e105`, on the 0.17.x branch; not reproduced here).
+  (`026e105`, in 0.17.1; not reproduced here).
 
 ### The self-hosted x86_64 backend cannot encode what the target CPU lacks
 
@@ -860,15 +887,18 @@ fetches), or ask the user before changing their environment.
 - `std.testing.allocator` leaks fail the test in ReleaseFast too (0.16 passed them silently).
 - `std.process.getUserInfo(io, name)` compiles and works.
 
-## Known 0.17.0 library behaviour (read from the 0.17.0 source)
+## Known 0.17 library behaviour (read from the 0.17.0 source, rechecked against the 0.17.1 diff)
 - **`std.crypto.ff` `powWithEncodedExponent` loops over the exponent bytes as given**
   (`ff.zig` `powWithEncodedExponentInternal`): the running time reveals the encoded length.
   With a secret exponent, pass it encoded at the modulus byte length (left-padded) yourself;
-  `powWithEncodedPublicExponent` is for public exponents only. A fix upstream is reported on
-  the 0.17.x branch and is not in 0.17.0.
-- **`ff.Fe.eql` compares limbs only** (`ff.zig` `eql` -> `x.v.eql(y.v)`, the `montgomery` flag is
-  ignored): a plain and a Montgomery-form element of the same number compare unequal (and
-  limbs can coincide for different numbers). Convert both operands to the same form first.
+  `powWithEncodedPublicExponent` is for public exponents only. Still so in 0.17.1: the fix
+  there (`12caf4e`) changed `Modulus.pow(x, e: Fe)`, which now encodes `e` at the modulus length
+  (`encodedLen()`), and `powPublic`, which trims to `bitLenPublic`; the loop itself is unchanged.
+  Prefer `pow` with an `Fe` exponent over encoding a secret exponent yourself.
+- **`ff.Fe.eql`**: on 0.17.0 it compares limbs only (`x.v.eql(y.v)`, the `montgomery` flag is
+  ignored), so limbs can coincide for different numbers. 0.17.1 (`84574e0`) also requires the
+  same representation: a plain and a Montgomery-form element compare unequal, and `compare` and
+  `isOdd` assert plain form. On both, convert the operands to the same (plain) form first.
 - **`std.crypto.ecdsa` reads `Curve.Fe.field_order`** (`crypto/ecdsa.zig` verify:
   `comptime assert(n < Fe.field_order and Fe.field_order < 2 * n)`): a hand-written curve type
   passed to `Ecdsa` needs a `comptime_int` `field_order` on its field type, next to the
@@ -901,24 +931,53 @@ fetches), or ask the user before changing their environment.
   (`crypto/25519/edwards25519.zig` `fromBytes`, `InvalidEncoding`), so a test that used std as a lenient reference for
   such a point now sees an error.
 
-## Known 0.17.0 issues fixed on the 0.17.x branch
+## Known 0.17.0 issues and their status in 0.17.1
 
-Taken from the 0.17.x branch commit log and the project's issue list. **Per the commit
-message, not reproduced here** unless a row says otherwise; each row names the commit.
-Check which point release you have; the last two rows are open, not branch fixes.
+Mapped from the 0.17.0..0.17.1 commit list (209 commits) and the issue tracker. **Per the
+commit message, not reproduced here** unless a row says "run". On 0.17.0 each row is a live
+bug; requiring 0.17.1 (`minimum_zig_version`) removes all of the first table.
 
-| Commit | Symptom (as the message states it) |
+Fixed in 0.17.1:
+
+| Commit | Symptom on 0.17.0 |
 |---|---|
+| `ee65c2b` (#37127/#37131) | Signed to narrower unsigned `@intCast` is `trunc nsw` (run: see the section above) |
+| `ebed931` (#37110) | aarch64: error union with a 32-byte `@Vector` payload loses the error (run under qemu, see above) |
+| `3cc91ba` (#37321) | aarch64 SVE predicates not declared clobbered by `svc` (see above) |
+| `327181a` | `std.debug.simple_panic` does not compile (run: 0.17.0 `error set is discarded` in `simple_panic.zig`, 0.17.1 builds) |
+| `7c793c2` (#37141) | `checkAllAllocationFailures` reports `NondeterministicMemoryUsage` when resizes succeed in place (std-testing.md) |
+| `c99f5c9` (#36912) | `Io.Event.waitTimeout` returns `error.Timeout` on a spurious wakeup (std-thread.md) |
+| `12caf4e`, `84574e0` | `crypto.ff`: `Modulus.pow` / `powPublic` exponent encoding lengths; `Fe.eql` compared values across Montgomery and plain form (see "Known 0.17 library behaviour") |
 | `20057b4` | An array sentinel is discarded when a sentinel-terminated array is coerced to a slice |
+| `b23c07e` (#37342) | A comptime array with repeating elements loses its sentinel |
+| `43a0910`, `5866017` (#37335) | LLVM: wrong struct/union padding, an incorrect struct initialization in release builds |
+| `a4695d4` | Coercing an untyped `&.{}` to an empty slice crashes the compiler |
 | `026e105` (#31677) | `zig build --fork=<dir>` with two or more matching packages always fails |
-| `388c02e`, `c629ee4` | `Io.net` control-message (cmsg) alignment; `Stream` read after control data |
-| `d3b1f18` | mips `syscall4` and up lack the `$a3` output |
-| `c6044e6` | `base64` decoded-size bound wrong |
-| `4465f34` | `aessiv` with empty input |
-| `15c1d31` | `std.http` request-body edge cases |
+| `0be75fc` | Maker: stack use-after-free of `dynamic_linker_path` (random crash with `-Ddynamic-linker`) |
+| `07590f2` | Lazy dependencies that a step needs are fetched and the configuration retried |
+| `e63e88c` | `--watch` did not add directories to the watch list |
 | `bf93660` | `stack_protector` is not part of the cache key: stale objects after toggling it |
 | `a81a808` | `@shrExact` does not emit `shr_exact` under safety |
-| `7c793c2` | `checkAllAllocationFailures` / `NondeterministicMemoryUsage` (see std-testing.md for a workaround that was compiled and run) |
-| `12caf4e` | `powWithEncodedExponent` length leak (see above) |
-| `Io.Event.waitTimeout` spurious wakeups (#36912) | open pull request, not merged anywhere |
-| #37131 | issue open, fix PR open and unmerged when the inventory was taken (2026-10-18): signed to narrower unsigned `@intCast` is `trunc nsw` (reproduced here, see above) |
+| `388c02e`, `c629ee4` | `Io.net` control-message (cmsg) alignment; `Stream` read after control data |
+| `46173d2`, `a6dddfa` | `Io.net`: IPv6 with an IPv4 tail; `Ip4Address.fromAny` returns `?Ip4Address` |
+| `4428d52`, `975d74f` | `Io.Threaded`: `renamePreserve` on kernels without `renameat2` flags; EACCES on file reads |
+| `a4b8ba9` | `std.Io` writer spins on flush when the underlying io keeps failing |
+| `15c1d31` | `std.http` request bodies: POST with an empty body, `discardBody`, bodies on GET/DELETE/OPTIONS |
+| `c6044e6` | `base64` decoded-size upper bound wrong |
+| `4465f34`, `57e52b7` | `aes_siv` with empty input; `sha3.TupleHashXOF` output length |
+| `eb4b3eb` | `HashMap.removeByPtr` does not compile |
+| `1bb9a9d` | `std.os.linux.sigdelset` toggles the bit instead of clearing it |
+| `35d8e63`, `0617b16` | `zon.parse.fromZoir*` ignores the `node` option; `Diagnostics` output had a trailing newline |
+| `d3b1f18` | mips `syscall4` and up lack the `$a3` output |
+| `332668c` (#37006) | soft-float compiler-rt on x86 (issue closed in the 0.17.1 milestone; commit matched by title) |
+| SPIR-V commits (#37050) | SPIR-V backend regression |
+
+Still open after 0.17.1 (keep the workarounds):
+
+| Issue | Symptom |
+|---|---|
+| #36256 (PR #37183 open) | Wide `@bitCast` / `readInt(u128)` lowered per byte (see "byte array and wider lanes") |
+| #36969 | `SmpAllocator` growth (std-allocators.md) |
+| #35724 | Inline asm with one register as input, output and clobber miscompiles (`std.Io.fiber.contextSwitch`, see above) |
+| #36444 | Response files in `std.Build.Step.Run` (milestone 0.18.0) |
+| #36986 | Strong exports overriding weak ones: partly fixed by `5aef08a` (LLVM + ELF); C backend and the self-hosted WASM/Mach-O linkers still affected |

@@ -58,6 +58,10 @@ diagnostics are allocated from `arena`; `gpa` is only scratch space. There is no
 | `diag.iterateErrors()` / `getLocation` / `fmtMessage` | `diag.errors` (each has `.msg`, `.loc`), `diag.log(path)`, `diag.fatal(path)`, `"{f}", .{diag.fmt(path)}` |
 | `.free_on_error` option | gone (the arena owns everything) |
 
+0.17.1 fixes (`35d8e63`, `0617b16`): `fromZoir*` honours the `node` option (0.17.0 parsed from
+the root regardless), and `diag.fmt` output has no trailing newline (several errors are
+separated by `\n`), so a test that compares formatted diagnostics byte for byte changes.
+
 `fromSliceNoAlloc` asserts at compile time that `T` has no pointers, so its result may
 outlive the arena. New: `updateFromSlice(T, &value, options)` overwrites only the fields the
 ZON source names — layered config files (global, then per-project) in one call each.

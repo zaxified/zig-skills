@@ -1,5 +1,5 @@
 
-# std.Build - Zig Build System Reference (0.17.0)
+# std.Build - Zig Build System Reference (0.17.1)
 
 The Zig build system models projects as directed acyclic graphs (DAG) of build steps. Build scripts are written in Zig itself (`build.zig`), providing full language features during configuration.
 
@@ -1140,6 +1140,14 @@ zig build --prefix=/opt/myapp
 zig build --prefix-lib-dir=lib64
 zig build --prefix-exe-dir=sbin
 ```
+
+0.17.1 (`17cf964`) separates where the build writes from where the files will live: the
+`install_*` path bases are `$DESTDIR` + the prefix, and the new `deployed_prefix`,
+`deployed_lib`, `deployed_bin`, `deployed_include` bases (`std.Build.Configuration.Path.Base`,
+used through `LazyPath.relative`) are the paths on the target system, unaffected by `$DESTDIR`.
+They exist for files that must embed absolute install paths (a pkg-config `.pc` file); avoid
+embedding absolute paths otherwise. The configure phase cannot depend on either kind (it
+panics). Read from the 0.17.1 source, not run for this skill.
 
 ## Common Patterns
 
